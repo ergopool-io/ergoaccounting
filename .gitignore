@@ -1,0 +1,7 @@
+.idea/*
+*.pyc
+*__pychache__*
+*.sqlite3
+ErgoAccounting/production.py
+.DS_Store
+*/migrations/*
