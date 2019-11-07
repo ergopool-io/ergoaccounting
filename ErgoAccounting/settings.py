@@ -20,10 +20,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # See https://docs.djangoproject.com/en/2.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 't3tk&-w58t4++!rpvb5$#z04g4#l*tl_744n$-opfmq5^!3_+-'
+SECRET_KEY = 'op$a-s9v89wb1xalj!k3k#k1en*tzys2=0dcx4cf9ch*+qgbwd'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
+
+
 
 # Application definition
 
@@ -34,7 +36,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'core',
+    'rest_framework',
+    'core' 
 ]
 
 MIDDLEWARE = [
@@ -68,12 +71,13 @@ TEMPLATES = [
 WSGI_APPLICATION = 'ErgoAccounting.wsgi.application'
 
 
-# Config
+# Database
+# https://docs.djangoproject.com/en/2.2/ref/settings/#databases
+
 try:
     from .production import *
 except:
     raise Exception("System configured incorrectly")
-
 # Password validation
 # https://docs.djangoproject.com/en/2.2/ref/settings/#auth-password-validators
 
