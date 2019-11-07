@@ -5,3 +5,5 @@
 ErgoAccounting/production.py
 .DS_Store
 */migrations/*
+.vscode
+ergo/*
