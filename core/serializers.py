@@ -2,7 +2,6 @@ from rest_framework import serializers
 from .models import *
 
 
-
 class ShareSerializer(serializers.ModelSerializer):
     class Meta:
         model = Share
@@ -14,4 +13,3 @@ class BalanceSerializer(serializers.ModelSerializer):
         model = Balance
         fields = '__all__'
         read_only_fields = ['status']
-
