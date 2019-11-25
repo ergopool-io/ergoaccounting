@@ -37,7 +37,7 @@ class Balance(models.Model):
         (3, "withdraw"))
 
     miner = models.ForeignKey("Miner", on_delete=models.CASCADE)
-    share = models.CharField(max_length=255, blank=True, null=True)
+    share = models.ForeignKey("Share", on_delete=models.CASCADE)
     balance = models.FloatField(default=0)
     status = models.IntegerField(blank=False, choices=STATUS_CHOICE, default=1)
     created_at = models.DateTimeField(auto_now_add=True)
