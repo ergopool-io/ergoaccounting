@@ -96,7 +96,7 @@ class DashboardView(viewsets.GenericViewSet,
         return self.get_response(request)
 
     def retrieve(self, request, *args, **kwargs):
-        return self.get_response(request, request.pk)
+        return self.get_response(request, kwargs.get("pk"))
 
     def get_response(self, request, pk=None):
         """
