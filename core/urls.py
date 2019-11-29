@@ -5,5 +5,6 @@ from .views import *
 router = routers.DefaultRouter()
 router.register(r'shares', ShareView)
 router.register(r'balance', BalanceView)
+router.register(r'conf', ConfigurationViewSet)
 
 urlpatterns = router.urls
