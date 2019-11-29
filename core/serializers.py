@@ -18,4 +18,4 @@ class BalanceSerializer(serializers.ModelSerializer):
 class ConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Configuration
-        fields = '__all__'
+        fields = ['key', 'value']

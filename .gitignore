@@ -8,3 +8,8 @@ ErgoAccounting/production.py
 !*/migrations/__init__.py
 .vscode
 ergo/*
+lib/
+bin/
+include/
+.Python
+pip-selfcheck.json

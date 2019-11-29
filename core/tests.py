@@ -1,15 +1,20 @@
+import random
+import string
+
 from django.test import TestCase, Client
 from mock import patch
-from rest_framework.test import APIClient
-from rest_framework.test import APIRequestFactory
-from rest_framework.test import APITestCase
-from rest_framework import status
-import core.utils
-from .models import *
-from .views import *
-from .utils import *
 
-'''
+import core.utils
+from .views import *
+from datetime import datetime, timedelta
+
+
+def random_string(length=10):
+    """Generate a random string of fixed length """
+    letters = string.ascii_lowercase + string.ascii_uppercase + string.digits
+    return ''.join(random.choice(letters) for i in range(length))
+
+
 class ShareTestCase(TestCase):
     def setUp(self):
         self.client = Client()
@@ -23,7 +28,7 @@ class ShareTestCase(TestCase):
                 'miner': '1',
                 'nonce': '1',
                 'status': '2'}
-        response = self.client.post('/shares/', data, format='json')
+        self.client.post('/shares/', data, format='json')
         self.assertTrue(mocked_call_prop.isCalled())
 
     @patch('core.utils.prop')
@@ -34,9 +39,9 @@ class ShareTestCase(TestCase):
                 'miner': '1',
                 'nonce': '1',
                 'status': '2'}
-        response = self.client.post('/shares/', data, format='json')
+        self.client.post('/shares/', data, format='json')
         self.assertFalse(mocked_not_call_prop.isCalled())
-'''
+
 
 class PropFunctionTest(TestCase):
     """
@@ -340,6 +345,130 @@ class PropFunctionTest(TestCase):
         Miner.objects.all().delete()
 
 
+class DashboardTestCase(TestCase):
+    def setUp(self) -> None:
+        self.client = Client()
+
+        # Create two miner; abc and xyz
+        miners = [
+            Miner.objects.create(public_key='abc', nick_name='ABC'),
+            Miner.objects.create(public_key='xyz', nick_name='XYZ')
+        ]
+
+        # Set current time
+        self.now = datetime.now()
+
+        # Create shares
+        shares = [
+            Share.objects.create(share=random_string(), miner=miners[0], nonce=random.randint(0, 1000), status=1,
+                                 created_at=self.now),
+            Share.objects.create(share=random_string(), miner=miners[0], nonce=random.randint(0, 1000), status=2,
+                                 created_at=self.now + timedelta(minutes=1)),
+            Share.objects.create(share=random_string(), miner=miners[0], nonce=random.randint(0, 1000), status=2,
+                                 created_at=self.now + timedelta(minutes=2)),
+            Share.objects.create(share=random_string(), miner=miners[0], nonce=random.randint(0, 1000), status=3,
+                                 created_at=self.now + timedelta(minutes=3)),
+            Share.objects.create(share=random_string(), miner=miners[1], nonce=random.randint(0, 1000), status=2,
+                                 created_at=self.now + timedelta(minutes=4)),
+            Share.objects.create(share=random_string(), miner=miners[1], nonce=random.randint(0, 1000), status=2,
+                                 created_at=self.now + timedelta(minutes=5)),
+        ]
+
+        # Create balances
+        balances = [
+            Balance.objects.create(miner=miners[0], share=shares[0], balance=100, status=1),
+            Balance.objects.create(miner=miners[0], share=shares[1], balance=200, status=1),
+            Balance.objects.create(miner=miners[0], share=shares[2], balance=300, status=2),
+            Balance.objects.create(miner=miners[0], share=shares[3], balance=400, status=3),
+            Balance.objects.create(miner=miners[1], share=shares[4], balance=500, status=2),
+            Balance.objects.create(miner=miners[1], share=shares[5], balance=600, status=2),
+        ]
+
+    def test_get_all(self):
+        """
+        Purpose: Check if Dashboard view returns the correct info for all miners.
+        Prerequisites: Nothing
+        Scenario: Sends a request to /dashboard/ and checks if response is correct
+        Test Conditions:
+        * status is 200
+        * Content-Type is application/json
+        * Content is :
+        {
+            'round_shares': 4,
+            'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
+            'users': {
+                'abc': {
+                    "round_shares": 2,
+                    "immature": 300.0,
+                    "mature": 300.0,
+                    "withdraw": 400.0
+                },
+                'xyz': {
+                    "round_shares": 2,
+                    "immature": 0,
+                    "mature": 1100.0,
+                    "withdraw": 0
+                }
+            }
+        }
+        """
+        response = self.client.get('/dashboard/').json()
+        self.assertDictEqual(response, {
+            'round_shares': 4,
+            'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
+            'users': {
+                'abc': {
+                    "round_shares": 2,
+                    "immature": 300.0,
+                    "mature": 300.0,
+                    "withdraw": 400.0
+                },
+                'xyz': {
+                    "round_shares": 2,
+                    "immature": 0,
+                    "mature": 1100.0,
+                    "withdraw": 0
+                }
+            }
+        })
+
+    def test_get_specified_pk(self):
+        """
+        Purpose: Check if Dashboard view returns the correct info for the specified miner (abc)
+        Prerequisites: Nothing
+        Scenario: Sends a request to /dashboard/abc and checks if response is correct for miner 'abc'
+        Test Conditions:
+        * status is 200
+        * Content-Type is application/json
+        * Content is :
+        {
+            'round_shares': 4,
+            'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
+            'users': {
+                'abc': {
+                    "round_shares": 2,
+                    "immature": 300.0,
+                    "mature": 300.0,
+                    "withdraw": 400.0
+                }
+            }
+        }
+        """
+        response = self.client.get('/dashboard/abc').json()
+        self.assertDictEqual(response, {
+            'round_shares': 4,
+            'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
+            'users': {
+                'abc': {
+                    "round_shares": 2,
+                    "immature": 300.0,
+                    "mature": 300.0,
+                    "withdraw": 400.0
+                }
+            }
+        })
+
+
 class ConfigurationAPITest(TestCase):
     """
     Test class for Configuration API
@@ -370,13 +499,10 @@ class ConfigurationAPITest(TestCase):
         keys = [key for (key, temp) in KEY_CHOICES]
         # define expected response as an empty list
         expected_response = []
-        # define an 'id' variable for expected response
-        conf_id = 1
         # create a json like dictionary for any key in keys
         for key in keys:
             Configuration.objects.create(key=key, value=1)
-            expected_response.append({'id': conf_id, 'key': key, 'value': 1.0})
-            conf_id += 1
+            expected_response.append({'key': key, 'value': 1.0})
         # send a http 'get' request to the configuration endpoint
         response = self.client.get('/conf/')
         # check the status of the response
