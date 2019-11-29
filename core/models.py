@@ -29,7 +29,7 @@ class Share(models.Model):
         (4, "repetitious"))
 
     share = models.CharField(max_length=255, blank=False)
-    miner = models.ForeignKey("Miner", on_delete=models.CASCADE)
+    miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     nonce = models.IntegerField(blank=False)
     status = models.IntegerField(blank=False, choices=STATUS_CHOICE)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -45,8 +45,8 @@ class Balance(models.Model):
         (2, "mature"),
         (3, "withdraw"))
 
-    miner = models.ForeignKey("Miner", on_delete=models.CASCADE)
-    share = models.ForeignKey("Share", on_delete=models.CASCADE)
+    miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
+    share = models.ForeignKey(Share, on_delete=models.CASCADE)
     balance = models.FloatField(default=0)
     status = models.IntegerField(blank=False, choices=STATUS_CHOICE, default=1)
     created_at = models.DateTimeField(auto_now_add=True)
