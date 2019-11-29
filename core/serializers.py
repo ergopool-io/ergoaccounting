@@ -13,3 +13,9 @@ class BalanceSerializer(serializers.ModelSerializer):
         model = Balance
         fields = '__all__'
         read_only_fields = ['status']
+
+
+class ConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Configuration
+        fields = '__all__'

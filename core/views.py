@@ -1,14 +1,14 @@
-from rest_framework import viewsets, mixins
 from rest_framework.response import Response
 from django.db.models import Q, Count, Sum
 from rest_framework.views import APIView
-
+from rest_framework import viewsets, mixins, filters
 from .serializers import *
 from .utils import prop
+from .models import *
 
 
 class ShareView(viewsets.GenericViewSet,
-                mixins.CreateModelMixin, ):
+                mixins.CreateModelMixin):
     queryset = Share.objects.all()
     serializer_class = ShareSerializer
 
@@ -40,6 +40,7 @@ class BalanceView(viewsets.GenericViewSet,
                   mixins.ListModelMixin, ):
     queryset = Balance.objects.all()
     serializer_class = BalanceSerializer
+
     # change status to 3
 
     def perform_create(self, serializer, *args, **kwargs):
@@ -97,3 +98,31 @@ class DashboardView(APIView):
             'users': miners_info
         }
         return Response(response)
+
+
+class ConfigurationViewSet(viewsets.GenericViewSet,
+                           mixins.CreateModelMixin,
+                           mixins.ListModelMixin):
+    serializer_class = ConfigurationSerializer
+    queryset = Configuration.objects.all()
+    filter_backends = (filters.SearchFilter,)
+    search_fields = ('key', 'value',)
+
+    def perform_create(self, serializer, *args, **kwargs):
+        """
+        we override the perform_create to create a new configuration
+        or update an existing configuration.
+        :param serializer:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        key = serializer.validated_data['key']
+        value = serializer.validated_data['value']
+        configurations = Configuration.objects.filter(key=key)
+        if not configurations:
+            serializer.save()
+        else:
+            configuration = Configuration.objects.get(key=key)
+            configuration.value = value
+            configuration.save()
