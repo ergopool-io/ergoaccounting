@@ -4,3 +4,4 @@ from .models import *
 admin.site.register(Miner)
 admin.site.register(Share)
 admin.site.register(Balance)
+admin.site.register(Configuration)
