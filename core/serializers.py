@@ -3,6 +3,8 @@ from .models import *
 
 
 class ShareSerializer(serializers.ModelSerializer):
+    miner = serializers.CharField()
+
     class Meta:
         model = Share
         fields = '__all__'

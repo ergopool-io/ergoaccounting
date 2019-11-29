@@ -30,7 +30,6 @@ class Share(models.Model):
 
     share = models.CharField(max_length=255, blank=False)
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
-    nonce = models.IntegerField(blank=False)
     status = models.IntegerField(blank=False, choices=STATUS_CHOICE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
