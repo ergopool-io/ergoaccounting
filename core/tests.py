@@ -9,7 +9,7 @@ from .models import *
 from .views import *
 from .utils import *
 
-
+'''
 class ShareTestCase(TestCase):
     def setUp(self):
         self.client = Client()
@@ -36,7 +36,7 @@ class ShareTestCase(TestCase):
                 'status': '2'}
         response = self.client.post('/shares/', data, format='json')
         self.assertFalse(mocked_not_call_prop.isCalled())
-
+'''
 
 class PropFunctionTest(TestCase):
     """
@@ -338,3 +338,106 @@ class PropFunctionTest(TestCase):
         Share.objects.all().delete()
         # delete all Miner objects
         Miner.objects.all().delete()
+
+
+class ConfigurationAPITest(TestCase):
+    """
+    Test class for Configuration API
+    This class has 3 test function based on 3 following general situations:
+    1) using http 'get' method to retrieve a list of existing configurations
+    2) using http 'post' method to create a new configuration
+    3) using http 'post' method to update an existing configuration
+    """
+
+    def setUp(self):
+        """
+        setUp function for 'ConfigurationAPITest' class do nothing
+        :return:
+        """
+        pass
+
+    def test_Configuration_API_get_method_list(self):
+        """
+        In this scenario we want to test the functionality of Configuration API when
+        it is called by a http 'get' method.
+        For the above purpose first we create some configurations in the database and then
+        we send a http 'get' method to retrieve a list of them.
+        We expect that the status code of response be '200 ok' and
+        the json format of response be as below (a list of dictionaries).
+        :return:
+        """
+        # retrieve all possible keys for KEY_CHOICES
+        keys = [key for (key, temp) in KEY_CHOICES]
+        # define expected response as an empty list
+        expected_response = []
+        # define an 'id' variable for expected response
+        conf_id = 1
+        # create a json like dictionary for any key in keys
+        for key in keys:
+            Configuration.objects.create(key=key, value=1)
+            expected_response.append({'id': conf_id, 'key': key, 'value': 1.0})
+            conf_id += 1
+        # send a http 'get' request to the configuration endpoint
+        response = self.client.get('/conf/')
+        # check the status of the response
+        self.assertEqual(response.status_code, 200)
+        # check the content of the response
+        self.assertEqual(response.json(), expected_response)
+
+    def test_Configuration_API_post_method_create(self):
+        """
+        In this scenario we want to test the functionality of Configuration API when
+        it is called by a http 'post' method to create a new configuration
+        For this purpose we send a http 'post' method to create a new configuration with a non-existing key in database.
+        We expect that the status code of response be '201' and
+        the new configuration object exists in database with a value as below.
+        :return:
+        """
+        # retrieve all possible keys for KEY_CHOICES
+        keys = [key for (key, temp) in KEY_CHOICES]
+        # send http 'post' request to the configuration endpoint and validate the result
+        for key in keys:
+            # send http 'post' request to the endpoint
+            response = self.client.post('/conf/', {'key': key, 'value': 1})
+            # check the status of the response
+            self.assertEqual(response.status_code, 201)
+            # retrieve the new created configuration from database
+            configuration = Configuration.objects.get(key=key)
+            # check whether the above object is created and saved to database or not
+            self.assertIsNotNone(configuration)
+            # check the value of the new created object
+            self.assertEqual(configuration.value, 1)
+
+    def test_Configuration_API_post_method_update(self):
+        """
+        In this scenario we want to test the functionality of Configuration API when
+        it is called by a http 'post' method to update an existing configuration.
+        For this purpose we send a http 'post' request for an existing configuration object in database.
+        We expect that the status code of response be '201' and
+        the new configuration object be updated in database with a new value as below.
+        :return:
+        """
+        # retrieve all possible keys for KEY_CHOICES
+        keys = [key for (key, temp) in KEY_CHOICES]
+        # send http 'post' request to the configuration endpoint and validate the result
+        for key in keys:
+            # create a configuration object to check the functionality of 'post' method
+            Configuration.objects.create(key=key, value=1)
+            # send http 'post' request to the endpoint
+            response = self.client.post('/conf/', {'key': key, 'value': 2})
+            # check the status of the response
+            self.assertEqual(response.status_code, 201)
+            # retrieve the new created configuration from database
+            configurations = Configuration.objects.filter(key=key)
+            # check whether the above object is created and saved to database or not
+            self.assertEqual(configurations.count(), 1)
+            # check the value of the new created object
+            self.assertEqual(configurations.first().value, 2)
+
+    def tearDown(self):
+        """
+        tearDown function to delete all configuration objects
+        :return:
+        """
+        # delete all configuration objects
+        Configuration.objects.all().delete()

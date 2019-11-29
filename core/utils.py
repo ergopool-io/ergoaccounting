@@ -1,5 +1,6 @@
 from django.db.models import Count
-from .models import Share, Balance
+from django.db import transaction
+from .models import Share, Balance, Configuration
 
 
 def prop(share):
@@ -16,9 +17,9 @@ def prop(share):
     :return: nothing
     """
     # total reward per solved block
-    TOTAL_REWARD = 65
+    TOTAL_REWARD = Configuration.objects.TOTAL_REWARD
     # maximum reward : each miner must get reward less than MAX_REWARD
-    MAX_REWARD = 35
+    MAX_REWARD = Configuration.objects.MAX_REWARD
     # check whether the input share is 'solved' or not (valid, invalid, repetitious)
     if not share.status == 1:
         return
@@ -63,6 +64,8 @@ def prop(share):
             share=last_solved_share,
             balance=min(MAX_REWARD, TOTAL_REWARD * (share_count / total_number_of_shares)))
         )
-    # create and save balances to database
-    Balance.objects.bulk_create(balances)
+    # create Balance objects atomic
+    with transaction.atomic():
+        # create and save balances to database
+        Balance.objects.bulk_create(balances)
     return

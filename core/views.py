@@ -1,9 +1,12 @@
-from rest_framework import viewsets, mixins
+from rest_framework import viewsets, mixins, filters
 
 from .serializers import *
 from .utils import prop
+from .models import *
+
+
 class ShareView(viewsets.GenericViewSet,
-                mixins.CreateModelMixin, ):
+                mixins.CreateModelMixin):
     queryset = Share.objects.all()
     serializer_class = ShareSerializer
 
@@ -26,9 +29,8 @@ class ShareView(viewsets.GenericViewSet,
             serializer.save(status=4)
             _status = 4
         if _status == 1:
-            prop(Share.objects.get(share = _share, status=1))
+            prop(Share.objects.get(share=_share, status=1))
 
-    
 
 class BalanceView(viewsets.GenericViewSet,
                   mixins.CreateModelMixin,
@@ -36,6 +38,7 @@ class BalanceView(viewsets.GenericViewSet,
                   mixins.ListModelMixin, ):
     queryset = Balance.objects.all()
     serializer_class = BalanceSerializer
+
     # change status to 3
 
     def perform_create(self, serializer, *args, **kwargs):
@@ -49,3 +52,31 @@ class BalanceView(viewsets.GenericViewSet,
         :return:
         """
         serializer.save(status=3)
+
+
+class ConfigurationViewSet(viewsets.GenericViewSet,
+                           mixins.CreateModelMixin,
+                           mixins.ListModelMixin):
+    serializer_class = ConfigurationSerializer
+    queryset = Configuration.objects.all()
+    filter_backends = (filters.SearchFilter,)
+    search_fields = ('key', 'value',)
+
+    def perform_create(self, serializer, *args, **kwargs):
+        """
+        we override the perform_create to create a new configuration
+        or update an existing configuration.
+        :param serializer:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        key = serializer.validated_data['key']
+        value = serializer.validated_data['value']
+        configurations = Configuration.objects.filter(key=key)
+        if not configurations:
+            serializer.save()
+        else:
+            configuration = Configuration.objects.get(key=key)
+            configuration.value = value
+            configuration.save()
