@@ -13,23 +13,23 @@ class ShareView(viewsets.GenericViewSet,
     queryset = Share.objects.all()
     serializer_class = ShareSerializer
 
-    def perform_create(self, serializer, *args, **kwargs):
+    def perform_create(self, serializer):
         """
         in case any share is repetitious, regardles of being valid or invalid
         we must change the status to repetitious (status=4).
         :param serializer:
-        :param args:
-        :param kwargs:
         :return:
         """
-
+        miner = Miner.objects.filter(public_key=serializer.validated_data['miner'])
+        if not miner:
+            miner = Miner.objects.create(public_key=serializer.validated_data['miner'])
         _share = serializer.validated_data['share']
         _status = serializer.validated_data['status']
         rep_share = Share.objects.filter(share=_share)
         if not rep_share:
-            serializer.save()
+            serializer.save(miner=miner)
         else:
-            serializer.save(status=4)
+            serializer.save(status=4, miner=miner)
             _status = 4
         if _status == 1:
             prop(Share.objects.get(share=_share, status=1))
