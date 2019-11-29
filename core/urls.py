@@ -7,4 +7,7 @@ router = routers.DefaultRouter()
 router.register(r'shares', ShareView)
 router.register(r'balance', BalanceView)
 
-urlpatterns = router.urls
+urlpatterns = router.urls + [
+    path('dashboard/', DashboardView.as_view()),
+    path('dashboard/<str:pk>', DashboardView.as_view())
+]
