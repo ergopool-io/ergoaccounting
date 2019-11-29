@@ -2,6 +2,8 @@ from rest_framework import viewsets, mixins
 
 from .serializers import *
 from .utils import prop
+
+
 class ShareView(viewsets.GenericViewSet,
                 mixins.CreateModelMixin, ):
     queryset = Share.objects.all()
@@ -26,9 +28,8 @@ class ShareView(viewsets.GenericViewSet,
             serializer.save(status=4)
             _status = 4
         if _status == 1:
-            prop(Share.objects.get(share = _share, status=1))
+            prop(Share.objects.get(share=_share, status=1))
 
-    
 
 class BalanceView(viewsets.GenericViewSet,
                   mixins.CreateModelMixin,
