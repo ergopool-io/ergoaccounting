@@ -20,7 +20,7 @@ class ShareView(viewsets.GenericViewSet,
         :param serializer:
         :return:
         """
-        miner = Miner.objects.filter(public_key=serializer.validated_data['miner'])
+        miner = Miner.objects.filter(public_key=serializer.validated_data['miner'].lower()).first()
         if not miner:
             miner = Miner.objects.create(public_key=serializer.validated_data['miner'])
         _share = serializer.validated_data['share']
