@@ -78,7 +78,7 @@ class PropFunctionTest(TestCase):
             # each share is associated to a particular miner ( i % 5 )
             # the status of each share will be 2, 3 or 4
             shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), nonce=0, status=(i % 3) + 2))
+                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 3) + 2))
         # create share objects using shares list and save them to the test database
         Share.objects.bulk_create(shares)
         # call prop function for an invalid (not solved) share, 8th for example
@@ -103,7 +103,7 @@ class PropFunctionTest(TestCase):
         for i in range(16):
             # each share is associated to a particular miner ( i % 5 )
             shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), nonce=0, status=2))
+                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=2))
         # change only the status of last share to 'solved' (we want to check prop function in a case with only on
         # solved share)
         shares[15].status = 1
@@ -141,7 +141,7 @@ class PropFunctionTest(TestCase):
         for i in range(10):
             # each share is associated to a particular miner ( i % 5 )
             shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), nonce=0, status=2))
+                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=2))
         # change the status of the second and the 8th share to 'solved' for testing prop function
         shares[1].status = 1
         shares[7].status = 1
@@ -180,7 +180,7 @@ class PropFunctionTest(TestCase):
             # each share is associated to a particular miner ( i % 5 )
             # the status of each share will be 2, 3 or 4
             shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), nonce=0, status=(i % 3) + 2))
+                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 3) + 2))
         # change the status of the first and the last shares to 'solved'
         shares[0].status = 1
         shares[9].status = 1
@@ -211,7 +211,7 @@ class PropFunctionTest(TestCase):
         for i in range(23):
             # each share is associated to a particular miner ( i % 5 )
             shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), nonce=0, status=2))
+                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=2))
         # change the status of the first, the 8th and 20th share to 'solved'
         shares[0].status = 1
         shares[7].status = 1
@@ -250,7 +250,7 @@ class PropFunctionTest(TestCase):
         for i in range(3):
             # each share is associated to a particular miner ( i % 5 )
             shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), nonce=0, status=1))
+                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=1))
         # change the status of the middle share to 'valid'
         shares[0].status = 2
         # create share objects using shares list and save them to the test database
@@ -281,7 +281,7 @@ class PropFunctionTest(TestCase):
         for i in range(1000):
             # each share is associated to a particular miner ( i % 5 ) and its status is 'invalid'
             shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), nonce=0, status=(i % 2) + 3))
+                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 2) + 3))
         # change the status of the first share and the last share to 'solved'
         shares[0].status = 1
         shares[999].status = 1
@@ -315,7 +315,7 @@ class PropFunctionTest(TestCase):
         for i in range(100):
             # each share is associated to a particular miner ( i % 5 ) and its status is 'invalid'
             shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), nonce=0, status=(i % 3) + 2))
+                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 3) + 2))
         # change the status of the 53th share and the 54th share to 'solved'
         shares[52].status = 1
         shares[53].status = 1
@@ -360,17 +360,17 @@ class DashboardTestCase(TestCase):
 
         # Create shares
         shares = [
-            Share.objects.create(share=random_string(), miner=miners[0], nonce=random.randint(0, 1000), status=1,
+            Share.objects.create(share=random_string(), miner=miners[0], status=1,
                                  created_at=self.now),
-            Share.objects.create(share=random_string(), miner=miners[0], nonce=random.randint(0, 1000), status=2,
+            Share.objects.create(share=random_string(), miner=miners[0], status=2,
                                  created_at=self.now + timedelta(minutes=1)),
-            Share.objects.create(share=random_string(), miner=miners[0], nonce=random.randint(0, 1000), status=2,
+            Share.objects.create(share=random_string(), miner=miners[0], status=2,
                                  created_at=self.now + timedelta(minutes=2)),
-            Share.objects.create(share=random_string(), miner=miners[0], nonce=random.randint(0, 1000), status=3,
+            Share.objects.create(share=random_string(), miner=miners[0], status=3,
                                  created_at=self.now + timedelta(minutes=3)),
-            Share.objects.create(share=random_string(), miner=miners[1], nonce=random.randint(0, 1000), status=2,
+            Share.objects.create(share=random_string(), miner=miners[1], status=2,
                                  created_at=self.now + timedelta(minutes=4)),
-            Share.objects.create(share=random_string(), miner=miners[1], nonce=random.randint(0, 1000), status=2,
+            Share.objects.create(share=random_string(), miner=miners[1], status=2,
                                  created_at=self.now + timedelta(minutes=5)),
         ]
 
@@ -454,7 +454,8 @@ class DashboardTestCase(TestCase):
             }
         }
         """
-        response = self.client.get('/dashboard/abc').json()
+        content = self.client.get('/dashboard/abc/')
+        response = content.json()
         self.assertDictEqual(response, {
             'round_shares': 4,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
