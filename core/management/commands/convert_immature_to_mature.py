@@ -5,12 +5,11 @@ from django.conf import settings
 from core.models import Balance, Share, Configuration
 
 
-NODE_URL = getattr(settings, "NODE_URL", "http://vorujak:9052/")
-url = os.path.join(NODE_URL, "wallet/transactionById")
-
-
 class Command(BaseCommand):
     help = 'updating immature balances to mature balance'
+
+    NODE_URL = getattr(settings, "NODE_URL", "http://vorujak:9052/")
+    url = os.path.join(NODE_URL, "wallet/transactionById")
 
     def handle(self, *args, **kwargs):
         shares = Share.objects.filter(balance__status=1)
