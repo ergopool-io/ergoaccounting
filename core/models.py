@@ -3,11 +3,13 @@ from django.db import models as models
 
 KEY_CHOICES = (
     ("TOTAL_REWARD", "TOTAL_REWARD"),
-    ("MAX_REWARD", "MAX_REWARD"))
+    ("MAX_REWARD", "MAX_REWARD"),
+    ("N", "N"))
 
 DEFAULT_KEY_VALUES = {
     'TOTAL_REWARD': 65,
     'MAX_REWARD': 35,
+    'N': 5,
 }
 
 
