@@ -13,4 +13,4 @@ DATABASES = {
     }
 }
 # Allowed Hosts
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', os.environ.get('HOST')]
+ALLOWED_HOSTS = ['127.0.0.1', os.environ.get('HOST'), os.environ.get("INTERNAL_HOST")]
