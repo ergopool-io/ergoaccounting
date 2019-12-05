@@ -33,6 +33,8 @@ class Share(models.Model):
     share = models.CharField(max_length=255, blank=False)
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     status = models.IntegerField(blank=False, choices=STATUS_CHOICE)
+    transaction_id = models.CharField(max_length=40, blank=True, null=True)
+    block_height = models.BigIntegerField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

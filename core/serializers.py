@@ -9,6 +9,26 @@ class ShareSerializer(serializers.ModelSerializer):
         model = Share
         fields = '__all__'
 
+    def validate(self, attrs):
+        """
+        check request data. if we store a solved solution transaction_id and block height is required.
+        otherwise these two field must be null
+        :param attrs:
+        :return:
+        """
+        # status is solved
+        if attrs.get("status") == 1:
+            if not attrs.get("transaction_id"):
+                raise serializers.ValidationError("transaction id is required when solved solution received")
+            if not attrs.get("block_height"):
+                raise serializers.ValidationError("block height is required when solved solution received")
+        else:
+            if 'transaction_id' in attrs:
+                del attrs['transaction_id']
+            if 'block_height' in attrs:
+                del attrs['block_height']
+        return attrs
+
 
 class BalanceSerializer(serializers.ModelSerializer):
     class Meta:
