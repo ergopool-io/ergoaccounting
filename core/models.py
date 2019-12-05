@@ -4,12 +4,14 @@ from django.db import models as models
 KEY_CHOICES = (
     ("TOTAL_REWARD", "TOTAL_REWARD"),
     ("MAX_REWARD", "MAX_REWARD"),
-    ("N", "N"))
+    ("N", "N"),
+    ("CONFIRMATION_LENGTH", "CONFIRMATION_LENGTH"))
 
 DEFAULT_KEY_VALUES = {
     'TOTAL_REWARD': 65,
     'MAX_REWARD': 35,
     'N': 5,
+    'CONFIRMATION_LENGTH': 10,
 }
 
 

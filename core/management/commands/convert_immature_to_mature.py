@@ -19,7 +19,7 @@ class Command(BaseCommand):
             transaction = requests.get(url, PARAMS).json()
             number_of_confirmations = transaction["numConfirmations"]
             height = transaction["inclusionHeight"]
-            if number_of_confirmations > Configuration.objects.CONFIGURATION_LENGTH:
+            if number_of_confirmations > Configuration.objects.CONFIRMATION_LENGTH:
                 Balance.objects.filter(share=share).update(status=2)
                 share.block_height = height
                 share.save()
