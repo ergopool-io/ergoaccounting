@@ -1,6 +1,6 @@
 import random
 import string
-
+import uuid
 from django.test import TestCase, Client
 from mock import patch
 
@@ -23,7 +23,6 @@ class ShareTestCase(TestCase):
     @patch('core.utils.prop')
     def test_prop_call(self, mocked_call_prop):
         mocked_call_prop.return_value = None
-        core.utils.prop(None)
         data = {'share': '1',
                 'miner': '1',
                 'nonce': '1',
@@ -34,13 +33,73 @@ class ShareTestCase(TestCase):
     @patch('core.utils.prop')
     def test_prop_not_call(self, mocked_not_call_prop):
         mocked_not_call_prop.return_value = None
-        core.utils.prop(None)
         data = {'share': '1',
                 'miner': '1',
                 'nonce': '1',
                 'status': '2'}
         self.client.post('/shares/', data, format='json')
         self.assertFalse(mocked_not_call_prop.isCalled())
+
+    def test_solved_share_without_transaction_id(self):
+        """
+        test if a solution submitted without transaction id no solution must store in database
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '1',
+                'nonce': '1',
+                'status': '1'}
+        self.client.post('/shares/', data, format='json')
+        self.assertFalse(Share.objects.filter(share=share).exists())
+
+    def test_solved_share_without_block_height(self):
+        """
+        test if a solution submitted without block height no solution must store in database
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '1',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                'status': '1'}
+        self.client.post('/shares/', data, format='json')
+        self.assertFalse(Share.objects.filter(share=share).exists())
+
+    def test_solved_share(self):
+        """
+        test if a solution submitted must store in database
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '1',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                "block_height": 40404,
+                'status': '1'}
+        self.client.post('/shares/', data, format='json')
+        self.assertTrue(Share.objects.filter(share=share).exists())
+
+    def test_validad_unsolved_share(self):
+        """
+        test if a non-solution submitted share must store with None in transaction_id and block_height
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '1',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                "block_height": 40404,
+                'status': '2'}
+        self.client.post('/shares/', data, format='json')
+        self.assertEqual(Share.objects.filter(share=share).count(), 1)
+        transaction = Share.objects.filter(share=share).first()
+        self.assertIsNone(transaction.transaction_id)
+        self.assertIsNone(transaction.block_height)
+
 
 
 class PropFunctionTest(TestCase):
