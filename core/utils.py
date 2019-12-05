@@ -66,6 +66,58 @@ def prop(share):
                 share=last_solved_share,
                 balance=min(MAX_REWARD, TOTAL_REWARD * (share_count / total_number_of_shares)))
             )
-    # create and save balances to database
-    Balance.objects.bulk_create(balances)
+        # create and save balances to database
+        Balance.objects.bulk_create(balances)
+    return
+
+
+def PPLNS(share):
+    """
+    This function use "PPLNS algorithm" as a pool mining reward method.
+    In fact 'PPLNS' function create a new balance for each miner which
+    has at least one 'valid' share in the last N 'valid' or 'solved' shares
+    before the input 'solved' share (the input is included too).
+    So we retrieve the last 'N' 'solved' or 'valid' shares before
+    the input 'solved' share (the input is included) and then we use 'prop' algorithm
+    to assign rewards to involving miners.
+    :param share: A 'solved' share which lead to creation of a new
+    block in the block chain (in normal situation)
+    If the input share isn't 'solved', it will be invalid and the function do nothing.
+    :return: nothing
+    """
+    # total reward per solved block
+    TOTAL_REWARD = Configuration.objects.TOTAL_REWARD
+    # maximum reward : each miner must get reward less than MAX_REWARD
+    MAX_REWARD = Configuration.objects.MAX_REWARD
+    # 'PPLNS' parameter
+    N = Configuration.objects.N
+    # check whether the input share is 'solved' or not (valid, invalid, repetitious)
+    if not share.status == 1:
+        return
+    # make all database requests and queries atomic
+    with transaction.atomic():
+        # delete all related balances if it's not the first execution of 'PPLNS' function for the input share
+        Balance.objects.filter(share=share).delete()
+        # retrieve last N 'solved' or 'valid' shares before the input share (the input is included too)
+        sliced_shares = Share.objects.filter(
+            id__lte=share.id,
+            status__lte=2).order_by('-id')
+        if sliced_shares.count() > N:
+            sliced_shares = sliced_shares[:N]
+        shares = Share.objects.filter(id__in=sliced_shares)
+        # a list of (miner's primary key, miner's valid shares) for this block mining round
+        miners_share_count = shares.values_list('miner').annotate(Count('miner'))
+        # total number of objects in 'shares' queryset
+        total_number_of_shares = shares.count()
+        # define "balances" as a list to create and save balance objects
+        balances = list()
+        # for each miner, create a new balance and calculate it's reward and save it
+        for (miner_id, share_count) in miners_share_count:
+            balances.append(Balance(
+                miner_id=miner_id,
+                share=share,
+                balance=min(MAX_REWARD, TOTAL_REWARD * (share_count / total_number_of_shares)))
+            )
+        # create and save balances to database
+        Balance.objects.bulk_create(balances)
     return
