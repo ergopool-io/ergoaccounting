@@ -7,7 +7,8 @@ class ShareSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Share
-        fields = '__all__'
+        fields = ['share', 'miner', 'status', 'transaction_id', 'block_height']
+        write_only_fields = ['transaction_id', 'block_height']
 
     def validate(self, attrs):
         """

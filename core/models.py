@@ -25,14 +25,14 @@ class Miner(models.Model):
 
 class Share(models.Model):
     STATUS_CHOICE = (
-        (1, "solved"),
-        (2, "valid"),
-        (3, "invalid"),
-        (4, "repetitious"))
+        ("solved", "solved"),
+        ("valid", "valid"),
+        ("invalid", "invalid"),
+        ("repetitious", "repetitious"))
 
     share = models.CharField(max_length=255, blank=False)
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
-    status = models.IntegerField(blank=False, choices=STATUS_CHOICE)
+    status = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
     transaction_id = models.CharField(max_length=40, blank=True, null=True)
     block_height = models.BigIntegerField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)

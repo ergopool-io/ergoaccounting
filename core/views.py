@@ -29,9 +29,9 @@ class ShareView(viewsets.GenericViewSet,
         if not rep_share:
             serializer.save(miner=miner)
         else:
-            serializer.save(status=4, miner=miner)
-            _status = 4
-        if _status == 1:
+            serializer.save(status="repetitious", miner=miner)
+            _status = "repetitious"
+        if _status == "solved":
             prop(Share.objects.get(share=_share, status=1))
 
 
