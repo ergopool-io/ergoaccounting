@@ -5,7 +5,7 @@ import os
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
-        'NAME': 'admin',
+        'NAME': 'db_accounting',
         'USER': 'admin',
         'PASSWORD': 'admin',
         'HOST': 'db',  # same as the docker-compose service
