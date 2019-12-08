@@ -3,10 +3,13 @@ import string
 import uuid
 from django.test import TestCase, Client
 from mock import patch
+from django.core.management import call_command
+from ErgoAccounting.settings import NODE_URL
 
 import core.utils
 from .views import *
 from datetime import datetime, timedelta
+from core.management.commands.convert_immature_to_mature import Command as ConvertImmatureToMatureCommand
 
 
 def random_string(length=10):
@@ -99,7 +102,6 @@ class ShareTestCase(TestCase):
         transaction = Share.objects.filter(share=share).first()
         self.assertIsNone(transaction.transaction_id)
         self.assertIsNone(transaction.block_height)
-
 
 
 class PropFunctionTest(TestCase):
@@ -975,3 +977,133 @@ class PPLNSFunctionTest(TestCase):
         self.assertEqual(balances.count(), 2)
         # check the amount of the balance to be 32.5erg
         self.assertEqual(balances[0].balance, 32.5)
+
+
+
+def mocked_requests_get(*args, **kwargs):
+    class MockResponse:
+        def __init__(self, json_data, status_code):
+            self.json_data = json_data
+            self._status_code = status_code
+
+        @property
+        def status_code(self):
+            return self._status_code
+
+        def json(self):
+            return self.json_data
+
+    if args[0] == NODE_URL + 'wallet/transactionById':
+        return MockResponse({
+            "numConfirmations": 15,
+            "inclusionHeight": 200
+        }, 200)
+
+    return MockResponse(None)
+
+
+class ConvertImmatureToMatureCommandTest(TestCase):
+    """
+    ...
+    """
+
+    def setUp(self):
+        """
+        setUp function to create 5 miners for testing command manager 'convert_immature_to_mature' function
+        :return:
+        """
+        # define a list of miner objects (it is used for bulk_create function)
+        miners = list()
+        # create 5 miners with nick_name as miner and public_key as '0', '1', '2', '3' and '4'
+        for i in range(5):
+            miners.append(Miner(nick_name='miner', public_key=str(i)))
+        # create and save miner objects to test database
+        Miner.objects.bulk_create(miners)
+
+    @patch('requests.get', side_effect=mocked_requests_get)
+    def test_covert_immature_to_mature_command_number_of_confirmation_greater_than_CONFIRMATION_LENGTH(self, mock_get):
+        """
+        In this scenario we test the functionality of the 'convert_immature_to_mature'
+        management command when there is only one 'solved' share in the database.
+        We have 5 miners and 20 shares which all of them are 'valid' except the last one.
+        Then we call 'prop' function for the only 'solved' share mentioned above and
+        then we call the command while the number of confirmations is greater than
+        the 'CONFIRMATION_LENGTH' and we check the status of the corresponding balances
+        and the height of the block_height solved share.
+        :return:
+        """
+        # define a list of shares (it is used in bulk_create function)
+        shares = list()
+        # create 16 shares with miners which are created in setUp function
+        for i in range(20):
+            # each share is associated to a particular miner ( i % 5 )
+            shares.append(
+                Share(share=str(i),
+                      miner=Miner.objects.get(public_key=str(i % 5)),
+                      status=2))
+        # change only the status of last share to 'solved'
+        shares[19].status = 1
+        # changing the transaction id of the last share
+        shares[19].transaction_id = '10'
+        # changing the block height of the last share
+        shares[19].block_height = 200
+        # create share objects using shares list and save them to the test database
+        Share.objects.bulk_create(shares)
+        # define last solved share
+        last_solved_share = shares[19]
+        # call prop function for the last solved share
+        prop(last_solved_share)
+        # execute the command
+        command = ConvertImmatureToMatureCommand()
+        command.handle()
+        # retrieve all Balance objects created
+        balances = last_solved_share.balance_set.all()
+        # check the status of the corresponding balances
+        for balance in balances:
+            self.assertEqual(balance.status, 2)
+        self.assertEqual(last_solved_share.block_height, 200)
+    '''
+    @patch('requests.get', side_effect=mocked_requests_get)
+    def test_covert_immature_to_mature_command_number_of_confirmation_less_than_CONFIRMATION_LENGTH_or_equal(
+            self, mock_get):
+        """
+        In this scenario we test the functionality of the 'convert_immature_to_mature'
+        management command when there is only one 'solved' share in the database.
+        We have 5 miners and 20 shares which all of them are 'valid' except the last one.
+        Then we call 'prop' function for the only 'solved' share mentioned above and
+        then we call the command while the number of confirmation is less than or equal to 'CONFIRMATION_LENGTH'
+        and we check the status of the corresponding balances
+        and the 'block_height' of the solved share.
+        :return:
+        """
+        # define a list of shares (it is used in bulk_create function)
+        shares = list()
+        # create 16 shares with miners which are created in setUp function
+        for i in range(20):
+            # each share is associated to a particular miner ( i % 5 )
+            shares.append(
+                Share(share=str(i),
+                      miner=Miner.objects.get(public_key=str(i % 5)),
+                      status=2))
+        # change only the status of last share to 'solved'
+        shares[19].status = 1
+        # changing the transaction id of the last share
+        shares[19].transaction_id = '10'
+        # changing the block height of the last share
+        shares[19].block_height = 200
+        # create share objects using shares list and save them to the test database
+        Share.objects.bulk_create(shares)
+        # define last solved share
+        last_solved_share = shares[19]
+        # call prop function for the last solved share
+        prop(last_solved_share)
+        # set the 'NUMBER_OF_CONFIRMATION' less than 'CONFIRMATION_LENGTH' ???
+        # execute the command
+        command = ConvertImmatureToMatureCommand()
+        command.handle()
+        # retrieve all Balance objects created
+        balances = last_solved_share.balance_set.all()
+        # check the status of the corresponding balances
+        for balance in balances:
+            self.assertEqual(balance.status, 1)
+    '''
