@@ -2,6 +2,7 @@ import random
 import string
 import uuid
 from django.test import TestCase, Client
+from django.utils import timezone
 from mock import patch
 
 import core.utils
@@ -38,7 +39,7 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 'status': '2'}
         self.client.post('/shares/', data, format='json')
-        self.assertFalse(mocked_not_call_prop.isCalled())
+        self.assertFalse(mocked_not_call_prop.called)
 
     def test_solved_share_without_transaction_id(self):
         """
@@ -78,7 +79,7 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
-                'status': '1'}
+                'status': 'solved'}
         self.client.post('/shares/', data, format='json')
         self.assertTrue(Share.objects.filter(share=share).exists())
 
@@ -93,13 +94,12 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
-                'status': '2'}
+                'status': 'valid'}
         self.client.post('/shares/', data, format='json')
         self.assertEqual(Share.objects.filter(share=share).count(), 1)
         transaction = Share.objects.filter(share=share).first()
         self.assertIsNone(transaction.transaction_id)
         self.assertIsNone(transaction.block_height)
-
 
 
 class PropFunctionTest(TestCase):
@@ -111,18 +111,29 @@ class PropFunctionTest(TestCase):
 
     def setUp(self):
         """
+        create 5 miners and 33 shares.
+        share indexes [14, 34, 35] are solved (indexes are from 0) odd indexes are invalid other are valid
         setUp function to create 5 miners for testing prop function
         :return:
         """
-        # define a list of miner objects (it is used for bulk_create function)
-        miners = list()
-        # create 5 miners with nick_name as miner and public_key as '0', '1', '2', '3' and '4'
-        for i in range(5):
-            miners.append(Miner(nick_name='miner', public_key=str(i)))
-        # create and save miner objects to test database
-        Miner.objects.bulk_create(miners)
+        # create miners lists
+        miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
+        # create shares list
+        shares = [Share.objects.create(
+            share=str(i),
+            miner=miners[i % 3],
+            status="solved" if i in [14, 34, 35] else "valid" if i % 2 == 0 else "invalid"
+        )for i in range(36)]
+        # set create date for each shares to make them a sequence valid
+        start_date = timezone.now() + timedelta(seconds=-100)
+        for share in shares:
+            share.created_at = start_date
+            share.save()
+            start_date += timedelta(seconds=1)
+        self.miners = miners
+        self.shares = shares
 
-    def test_prop_function_with_0_solved_share(self):
+    def test_prop_with_0_solved_share(self):
         """
         In this scenario we test the functionality of prop function when there isn't any 'solved' share in the database.
         We have 5 miners and 10 shares which are not 'solved'.
@@ -130,278 +141,68 @@ class PropFunctionTest(TestCase):
         we expect it to not exist any balance object corresponding to that 'not solved' input share.
         :return:
         """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 10 shares with miners which are created in setUp function
-        for i in range(10):
-            # each share is associated to a particular miner ( i % 5 )
-            # the status of each share will be 2, 3 or 4
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 3) + 2))
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
         # call prop function for an invalid (not solved) share, 8th for example
-        prop(shares[7])
-        # use an assertIsNone to check the correctness of prop functionality
-        # in this case we expect no balance associated to the input share
-        self.assertIsNone(Balance.objects.filter(share=shares[7]).first())
+        share = self.shares[12]
+        prop(share)
+        self.assertEqual(Balance.objects.filter(share=share).count(), 0)
 
-    def test_prop_function_with_1_solved_share(self):
+    def get_share_balance(self, sh):
+        return dict(Balance.objects.filter(share=sh).values_list('miner__public_key').annotate(models.Sum('balance')))
+
+    def test_prop_with_first_solved_share(self):
         """
-        In this scenario we test the functionality of prop function
-        when there is only one 'solved' share in the database.
-        We have 5 miners and 16 shares which all of them are 'valid' except the last one.
-        Then we call 'prop' function for the only 'solved' share mentioned above and
-        We expect the amount of balances in following order based on our 5 miners
-        16.25, 12.1875, 12.1875, 12.1875, 12.1875
+        in this scenario we call prop function with first solved share in database.
+        we generate 15 share 7 are invalid 7 are valid and one is solved
+
         :return:
         """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 16 shares with miners which are created in setUp function
-        for i in range(16):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=2))
-        # change only the status of last share to 'solved' (we want to check prop function in a case with only on
-        # solved share)
-        shares[15].status = 1
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # call prop function for the last and the only 'solved' share
-        prop(shares[15])
-        # retrieve all Balance objects created after calling prop function
-        balances = Balance.objects.filter(share=shares[15])
-        # check the amount of balances with assertEqual
-        self.assertEqual(balances[0].balance, 16.25)
-        self.assertEqual(balances[1].balance, 12.1875)
-        self.assertEqual(balances[2].balance, 12.1875)
-        self.assertEqual(balances[3].balance, 12.1875)
-        self.assertEqual(balances[4].balance, 12.1875)
+        share = self.shares[14]
+        prop(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': 24.375, '1': 16.25, '2': 24.375})
 
-    def test_prop_function_with_at_least_2_solved_shares(self):
+    def test_prop_between_two_solved_shares(self):
         """
-        In this scenario we test the functionality of prop function
-        when there is at least two 'solved' share in the database
-        and we call the function with a 'solved' share except the first 'solved' share.
-        We have 5 miners and 10 shares.
-        The second and the 8th share are 'solved' and
-        the fifth share is 'invalid' and
-        the 7th share which is 'repetitious' while
-        the other shares are 'valid'.
-        Then we call 'prop' function for the 9th share and
-        we expect the amount of balances in following order based on our 5 miners:
-        16.25, 32.5, 16.25
+        this function check when we have two solved share and some valid share between them.
+        in this case we have 9 valid share 9 invalid share and one solved share.
         :return:
         """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 10 shares with miners which are created in setUp function
-        for i in range(10):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=2))
-        # change the status of the second and the 8th share to 'solved' for testing prop function
-        shares[1].status = 1
-        shares[7].status = 1
-        # change the status of the 5th share to 'invalid'
-        shares[4].status = 3
-        # change the status of the 7th share to 'repetitious'
-        shares[6].status = 4
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last 'solved' share
-        last_solved_share = Share.objects.filter(status=1).order_by('-created_at')[0]
-        # call prop function for the last 'solved' share
-        prop(last_solved_share)
-        # retrieve all Balance objects created after calling prop function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the amount of balances using assertEqual
-        self.assertEqual(balances[0].balance, 16.25)
-        self.assertEqual(balances[1].balance, 32.5)
-        self.assertEqual(balances[2].balance, 16.25)
+        share = self.shares[34]
+        prop(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': 19.5, '1': 26.0, '2': 19.5})
 
-    def test_prop_function_with_invalid_input_share(self):
+    def test_prop_with_with_no_valid_share(self):
         """
-        In this scenario we test the functionality of prop function when
-        the input share is invalid (it is 'valid', 'invalid' or 'repetitious').
-        We have 5 miners and 10 shares.
-        The first and the last shares are 'solved' and
-        the other shares are not 'solved'.
-        Then we call 'prop' function for one of the not 'solved' shares and
-        we expect it to not exist any balance object corresponding to that not 'solved' input share
+        in this case we test when no valid share between solved shares
+        in this case we only have one share and reward must be minimum of MAX_REWARD and TOTAL_REWARD
         :return:
         """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 10 shares with miners which are created in setUp function
-        for i in range(10):
-            # each share is associated to a particular miner ( i % 5 )
-            # the status of each share will be 2, 3 or 4
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 3) + 2))
-        # change the status of the first and the last shares to 'solved'
-        shares[0].status = 1
-        shares[9].status = 1
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # call prop function for an invalid (not solved) share, 6th for example
-        prop(shares[5])
-        # use an assertIsNone to check the correctness of prop functionality
-        # in this case we expect no balance associated to the input share
-        self.assertIsNone(Balance.objects.filter(share=shares[5]).first())
+        share = self.shares[35]
+        prop(share)
+        balances = self.get_share_balance(share)
+        reward_value = min(Configuration.objects.MAX_REWARD, Configuration.objects.TOTAL_REWARD)
+        self.assertEqual(balances, {'2': float(reward_value)})
 
-    def test_prop_function_2_times_with_same_share(self):
+    def test_prop_called_multiple(self):
         """
-        In this scenario we test the functionality of prop function
-        when we call it 2 times with a same input share.
-        We have 5 miners and 23 shares.
-        The first ,the 8th and the 20th shares are 'solved' and
-        the fifth and the last share are 'invalid' and
-        the 17th share which is 'repetitious' while
-        the other shares are 'valid'.
-        Then we call 'prop' function for the 2th share 2 times and
-        we expect it to not exist repetitive balances.
+        in this case we call prop function 5 times. after each call balance for each miner must be same as expected
         :return:
         """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 23 shares with miners which are created in setUp function
-        for i in range(23):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=2))
-        # change the status of the first, the 8th and 20th share to 'solved'
-        shares[0].status = 1
-        shares[7].status = 1
-        shares[19].status = 1
-        # change the status of the 5th and the last share to 'invalid'
-        shares[4].status = 3
-        shares[22].status = 3
-        # change the status of the 17th share to 'repetitious'
-        shares[16].status = 4
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last solved share
-        last_solved_share = shares[19]
-        # call prop function for the last solved share for the first time
-        prop(last_solved_share)
-        # call prop function for the last solved share for the second time
-        prop(last_solved_share)
-        # retrieve all Balance objects created after calling prop function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the number of Balance objects created after calling prop function using assertEqual
-        self.assertEqual(balances.count(), 5)
-
-    def test_prop_function_upper_bound(self):
-        """
-        In this scenario we want to test the functionality of 'prop' function while
-        considering the upper bound 'MAX_REWARD' is necessary.
-        We have 5 miners and 3 shares.
-        The first and the last share are 'solved'.
-        The middle share is 'valid'.
-        We expect the reward to not be 65erg in this case.
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 3 shares with miners which are created in setUp function
-        for i in range(3):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=1))
-        # change the status of the middle share to 'valid'
-        shares[0].status = 2
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last 'solved' share
-        last_solved_share = Share.objects.filter(status=1).order_by('-created_at').first()
-        # call prop function for the last solved share
-        prop(last_solved_share)
-        # retrieve all Balance objects created after calling prop function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the amount of the balance to not be 65erg
-        self.assertNotEqual(balances[0], 65.0)
-
-    def test_prop_function_0_valid_share_between_2_solved_shares(self):
-        """
-        In this scenario we want to test the functionality of 'prop' function when
-        is no 'valid' share between two 'solved' shares.
-        We have 5 miners and 1000 shares.
-        The first and the last share are 'solved' while
-        the other shares are 'invalid' or 'repetitious'.
-        Then we call the 'prop' function for the last 'solved' share and
-        we expect that the number of Balance objects be 1 and the amount of the balance be 35erg (MAX_REWARD).
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 1000 shares with miners which are created in setUp function
-        for i in range(1000):
-            # each share is associated to a particular miner ( i % 5 ) and its status is 'invalid'
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 2) + 3))
-        # change the status of the first share and the last share to 'solved'
-        shares[0].status = 1
-        shares[999].status = 1
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last 'solved' share
-        last_solved_share = Share.objects.filter(status=1).order_by('-created_at').first()
-        # call prop function for the last 'solved' share
-        prop(last_solved_share)
-        # retrieve all Balance objects created after calling prop function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the number of the Balance objects to be 1
-        self.assertEqual(balances.count(), 1)
-        # check the amount of the balance to be 35erg
-        self.assertEqual(balances[0].balance, 35.0)
-
-    def test_prop_function_0_share_between_2_solved_shares(self):
-        """
-        In this scenario we want to test the functionality of 'prop' function when
-        is no share between two 'solved' shares.
-        We have 5 miners and 10000 shares.
-        The 53th and the 54th share are 'solved' while
-        the other shares are not 'solved'.
-        Then we call the 'prop' function for the last 'solved' share and
-        we expect that the number of Balance objects be 1 and the amount of the balance be 35erg (MAX_REWARD).
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 100 shares with miners which are created in setUp function
-        for i in range(100):
-            # each share is associated to a particular miner ( i % 5 ) and its status is 'invalid'
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 3) + 2))
-        # change the status of the 53th share and the 54th share to 'solved'
-        shares[52].status = 1
-        shares[53].status = 1
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last 'solved' share
-        last_solved_share = shares[53]
-        # call prop function for the last 'solved' share
-        prop(last_solved_share)
-        # retrieve all Balance objects created after calling prop function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the number of the Balance objects to be 1
-        self.assertEqual(balances.count(), 1)
-        # check the amount of the balance to be 35erg
-        self.assertEqual(balances[0].balance, 35.0)
+        share = self.shares[34]
+        for i in range(5):
+            prop(share)
+            balances = self.get_share_balance(share)
+            self.assertEqual(balances, {'0': 19.5, '1': 26.0, '2': 19.5})
 
     def tearDown(self):
         """
         tearDown function to delete miners created in setUp function
         :return:
         """
-        # delete all Balance objects
-        Balance.objects.all().delete()
-        # delete all Share objects
-        Share.objects.all().delete()
-        # delete all Miner objects
-        Miner.objects.all().delete()
+        # delete all miners objects. all related objects are deleted
+        for miner in self.miners:
+            miner.delete()
 
 
 class DashboardTestCase(TestCase):
@@ -419,17 +220,17 @@ class DashboardTestCase(TestCase):
 
         # Create shares
         shares = [
-            Share.objects.create(share=random_string(), miner=miners[0], status=1,
+            Share.objects.create(share=random_string(), miner=miners[0], status="solved",
                                  created_at=self.now),
-            Share.objects.create(share=random_string(), miner=miners[0], status=2,
+            Share.objects.create(share=random_string(), miner=miners[0], status="valid",
                                  created_at=self.now + timedelta(minutes=1)),
-            Share.objects.create(share=random_string(), miner=miners[0], status=2,
+            Share.objects.create(share=random_string(), miner=miners[0], status="valid",
                                  created_at=self.now + timedelta(minutes=2)),
-            Share.objects.create(share=random_string(), miner=miners[0], status=3,
+            Share.objects.create(share=random_string(), miner=miners[0], status="invalid",
                                  created_at=self.now + timedelta(minutes=3)),
-            Share.objects.create(share=random_string(), miner=miners[1], status=2,
+            Share.objects.create(share=random_string(), miner=miners[1], status="valid",
                                  created_at=self.now + timedelta(minutes=4)),
-            Share.objects.create(share=random_string(), miner=miners[1], status=2,
+            Share.objects.create(share=random_string(), miner=miners[1], status="valid",
                                  created_at=self.now + timedelta(minutes=5)),
         ]
 
@@ -453,17 +254,20 @@ class DashboardTestCase(TestCase):
         * Content-Type is application/json
         * Content is :
         {
-            'round_shares': 4,
+            'round_valid_shares': 4,
+            'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
             'users': {
                 'abc': {
-                    "round_shares": 2,
+                    "round_valid_shares": 2,
+                    "round_invalid_shares": 0,
                     "immature": 300.0,
                     "mature": 300.0,
                     "withdraw": 400.0
                 },
                 'xyz': {
-                    "round_shares": 2,
+                    "round_valid_shares": 2,
+                    "round_invalid_shares": 1,
                     "immature": 0,
                     "mature": 1100.0,
                     "withdraw": 0
@@ -473,17 +277,20 @@ class DashboardTestCase(TestCase):
         """
         response = self.client.get('/dashboard/').json()
         self.assertDictEqual(response, {
-            'round_shares': 4,
+            'round_valid_shares': 4,
+            'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
             'users': {
                 'abc': {
-                    "round_shares": 2,
+                    "round_valid_shares": 2,
+                    "round_invalid_shares": 1,
                     "immature": 300.0,
                     "mature": 300.0,
                     "withdraw": 400.0
                 },
                 'xyz': {
-                    "round_shares": 2,
+                    "round_valid_shares": 2,
+                    "round_invalid_shares": 0,
                     "immature": 0,
                     "mature": 1100.0,
                     "withdraw": 0
@@ -516,11 +323,13 @@ class DashboardTestCase(TestCase):
         content = self.client.get('/dashboard/abc/')
         response = content.json()
         self.assertDictEqual(response, {
-            'round_shares': 4,
+            'round_valid_shares': 4,
+            'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
             'users': {
                 'abc': {
-                    "round_shares": 2,
+                    "round_valid_shares": 2,
+                    "round_invalid_shares": 1,
                     "immature": 300.0,
                     "mature": 300.0,
                     "withdraw": 400.0
@@ -545,7 +354,7 @@ class ConfigurationAPITest(TestCase):
         """
         pass
 
-    def test_Configuration_API_get_method_list(self):
+    def test_configuration_api_get_method_list(self):
         """
         In this scenario we want to test the functionality of Configuration API when
         it is called by a http 'get' method.
@@ -556,7 +365,7 @@ class ConfigurationAPITest(TestCase):
         :return:
         """
         # retrieve all possible keys for KEY_CHOICES
-        keys = [key for (key, temp) in KEY_CHOICES]
+        keys = [key for (key, temp) in CONFIGURATION_KEY_CHOICE]
         # define expected response as an empty list
         expected_response = []
         # create a json like dictionary for any key in keys
@@ -570,7 +379,7 @@ class ConfigurationAPITest(TestCase):
         # check the content of the response
         self.assertEqual(response.json(), expected_response)
 
-    def test_Configuration_API_post_method_create(self):
+    def test_configuration_api_post_method_create(self):
         """
         In this scenario we want to test the functionality of Configuration API when
         it is called by a http 'post' method to create a new configuration
@@ -580,7 +389,7 @@ class ConfigurationAPITest(TestCase):
         :return:
         """
         # retrieve all possible keys for KEY_CHOICES
-        keys = [key for (key, temp) in KEY_CHOICES]
+        keys = [key for (key, temp) in CONFIGURATION_KEY_CHOICE]
         # send http 'post' request to the configuration endpoint and validate the result
         for key in keys:
             # send http 'post' request to the endpoint
@@ -594,7 +403,7 @@ class ConfigurationAPITest(TestCase):
             # check the value of the new created object
             self.assertEqual(configuration.value, 1)
 
-    def test_Configuration_API_post_method_update(self):
+    def test_configuration_api_post_method_update(self):
         """
         In this scenario we want to test the functionality of Configuration API when
         it is called by a http 'post' method to update an existing configuration.
@@ -604,7 +413,7 @@ class ConfigurationAPITest(TestCase):
         :return:
         """
         # retrieve all possible keys for KEY_CHOICES
-        keys = [key for (key, temp) in KEY_CHOICES]
+        keys = [key for (key, temp) in CONFIGURATION_KEY_CHOICE]
         # send http 'post' request to the configuration endpoint and validate the result
         for key in keys:
             # create a configuration object to check the functionality of 'post' method
@@ -619,6 +428,25 @@ class ConfigurationAPITest(TestCase):
             self.assertEqual(configurations.count(), 1)
             # check the value of the new created object
             self.assertEqual(configurations.first().value, 2)
+
+    def test_available_config_restore(self):
+        """
+        check manager model of configuration to get expected value when exists
+        :return:
+        """
+        for key, label in CONFIGURATION_KEY_CHOICE:
+            Configuration.objects.create(key=key, value=100000)
+        for key, label in CONFIGURATION_KEY_CHOICE:
+            self.assertEqual(getattr(Configuration.objects, key), 100000)
+
+    def test_default_config_restore(self):
+        """
+        check manager model of configuration to get default value when not exists in model
+        :return:
+        """
+        Configuration.objects.all().delete()
+        for key, label in CONFIGURATION_KEY_CHOICE:
+            self.assertEqual(getattr(Configuration.objects, key), CONFIGURATION_DEFAULT_KEY_VALUE.get(key))
 
     def tearDown(self):
         """
@@ -639,16 +467,71 @@ class PPLNSFunctionTest(TestCase):
 
     def setUp(self):
         """
-        setUp function to create 5 miners for testing 'PPLNS' function
+        setUp function to create 3 miners and 36 test
         :return:
         """
-        # define a list of miner objects (it is used for bulk_create function)
-        miners = list()
-        # create 5 miners with nick_name as miner and public_key as '0', '1', '2', '3' and '4'
+        # create miners lists
+        miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
+        # create shares list
+        shares = [Share.objects.create(
+            share=str(i),
+            miner=miners[int(i / 2) % 3],
+            status="solved" if i in [14, 44, 45] else "valid" if i % 2 == 0 else "invalid"
+        )for i in range(46)]
+        # set create date for each shares to make them a sequence valid
+        start_date = timezone.now() + timedelta(seconds=-100)
+        for share in shares:
+            share.created_at = start_date
+            share.save()
+            start_date += timedelta(seconds=1)
+        # set pplns prev count to 10
+        Configuration.objects.create(key="PPLNS_N", value=10)
+        self.miners = miners
+        self.shares = shares
+
+    def get_share_balance(self, sh):
+        return dict(Balance.objects.filter(share=sh).values_list('miner__public_key').annotate(models.Sum('balance')))
+
+    def test_pplns_with_invalid_share(self):
+        """
+        in this scenario we pass not solved share and function must do nothing
+        :return:
+        """
+        share = self.shares[13]
+        core.utils.PPLNS(share)
+        self.assertEqual(Balance.objects.filter(share=share).count(), 0)
+
+    def test_pplns_with_lower_amount_of_shares(self):
+        """
+        in this case we have 8 shares and pplns must work with this amount of shares
+        :return:
+        """
+        share = self.shares[14]
+        core.utils.PPLNS(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': 24.375, '1': 24.375, '2': 16.25})
+
+    def test_pplns_with_more_than_n_shares(self):
+        """
+        this function check when we have two solved share and some valid share between them.
+        in this case we have 9 valid share 9 invalid share and one solved share.
+        :return:
+        """
+        share = self.shares[44]
+        core.utils.PPLNS(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': 19.5, '1': 26.0, '2': 19.5})
+
+    def test_pplns_multiple(self):
+        """
+        in this case we call pplns function 5 times. after each call balance for each miner must be same as expected
+        :return:
+        """
+        share = self.shares[44]
         for i in range(5):
-            miners.append(Miner(nick_name='miner', public_key=str(i)))
-        # create and save miner objects to test database
-        Miner.objects.bulk_create(miners)
+            core.utils.PPLNS(share)
+            balances = self.get_share_balance(share)
+            self.assertEqual(balances, {'0': 19.5, '1': 26.0, '2': 19.5})
 
     def tearDown(self):
         """
@@ -661,317 +544,3 @@ class PPLNSFunctionTest(TestCase):
         Share.objects.all().delete()
         # delete all Miner objects
         Miner.objects.all().delete()
-
-    def test_PPLNS_function_with_0_solved_share(self):
-        """
-        In this scenario we test the functionality of 'PPLNS' function when
-        there isn't any 'solved' share in the database.
-        We have 5 miners and 10 shares which are not 'solved'.
-        Then we call 'PPLNS' function for one of the shares mentioned above and
-        we expect it to not exist any balance object corresponding to that not input share.
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 10 shares with miners which are created in setUp function
-        for i in range(10):
-            # each share is associated to a particular miner ( i % 5 )
-            # the status of each share will be 2, 3 or 4
-            shares.append(
-                Share(share='s', miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 3) + 2))
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # call 'PPLNS' function for an invalid (not solved and not valid) share, 6th for example
-        core.utils.PPLNS(shares[5])
-        # use an assertIsNone to check the correctness of 'PPLNS' functionality
-        # In this case we expect no balance associated to the input share
-        self.assertIsNone(Balance.objects.filter(share=shares[5]).first())
-
-    def test_PPLNS_function_with_0_solved_or_valid_share(self):
-        """
-        In this scenario we test the functionality of 'PPLNS' function when
-        there isn't any 'solved' or 'valid' share in the database.
-        We have 5 miners and 10 shares which are not 'solved' or 'valid'
-        Then we call 'PPLNS' function for one of the shares mentioned above and
-        we expect it to not exist any balance object corresponding to that not 'solved' input share.
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 10 shares with miners which are created in setUp function
-        for i in range(10):
-            # each share is associated to a particular miner ( i % 5 )
-            # the status of each share will be 3 or 4
-            shares.append(
-                Share(share='s', miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 2) + 3))
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # call 'PPLNS' function for an invalid (not solved and not valid) share, 9th for example
-        core.utils.PPLNS(shares[8])
-        # use an assertIsNone to check the correctness of 'PPLNS' functionality
-        # In this case we expect no balance associated to the input share
-        self.assertIsNone(Balance.objects.filter(share=shares[8]).first())
-
-    def test_PPLNS_function_with_1_solved_share(self):
-        """
-        In this scenario we test the functionality of 'PPLNS' function
-        when there is only one 'solved' share in the database and it's the input of the function.
-        We have 5 miners and 16 shares.
-        The last share is 'solved'.
-        The first, second, third, 6th, 8th and 13th shares are 'valid' and
-        the other shares are 'invalid' or 'repetitious'.
-        Then we call 'PPLNS' function for the only 'solved' share mentioned above and
-        We expect the amount of balances in following order:
-        26.0, 39.0
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 16 shares with miners which are created in setUp function
-        for i in range(16):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share='s', miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 2) + 3))
-        # change only the status of last share to 'solved' (we want to check 'PPLNS' function in a case with only on
-        # solved share)
-        shares[15].status = 1
-        # change the status of the first, second, third, 6th, 8th and 13th shares to 'valid'
-        shares[0].status = 2
-        shares[1].status = 2
-        shares[2].status = 2
-        shares[5].status = 2
-        shares[7].status = 2
-        shares[12].status = 2
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # call 'PPLNS' function for the last and the only 'solved' share
-        core.utils.PPLNS(shares[15])
-        # retrieve all Balance objects created after calling PPLNS function
-        balances = Balance.objects.filter(share=shares[15])
-        # check the amount of balances with assertEqual
-        self.assertEqual(balances[0].balance, 26)
-        self.assertEqual(balances[1].balance, 35)  # because of the upper bound
-
-    def test_PPLNS_function_exceeding_block_mining_round(self):
-        """
-        In this scenario we test the functionality of 'PPLNS' function
-        when there is at least two 'solved' share in the database
-        and we call the function with a 'solved' share except the first 'solved' share.
-        In this case the 'N' parameter is greater than the number of current mining round 'valid' shares.
-        We have 5 miners and 15 shares.
-        The third, 10th and the last shares are 'solved' and
-        the second, 5th, 8th, 11th and 12th share are 'valid' while
-        the other shares are 'invalid' or 'repetitious'.
-        Then we call 'PPLNS' function for the last share and
-        we expect the amount of balances in following order based on our miners:
-        13, 13, 13, 26
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 15 shares with miners which are created in setUp function
-        for i in range(15):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 2) + 3))
-        # change the status of the third, 10th and the last share to 'solved' for testing 'PPLNS' function
-        shares[2].status = 1
-        shares[9].status = 1
-        shares[14].status = 1
-        # change the status of the second, 5th, 8th, 11th and the 12th share to 'valid'
-        shares[1].status = 2
-        shares[4].status = 2
-        shares[7].status = 2
-        shares[10].status = 2
-        shares[11].status = 2
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last 'solved' share
-        last_solved_share = Share.objects.filter(status=1).order_by('-created_at').first()
-        # call 'PPLNS' function for the last 'solved' share
-        core.utils.PPLNS(last_solved_share)
-        # retrieve all Balance objects created after calling PPLNS function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the amount of balances using assertEqual
-        self.assertEqual(balances[0].balance, 13)
-        self.assertEqual(balances[1].balance, 13)
-        self.assertEqual(balances[2].balance, 13)
-        self.assertEqual(balances[3].balance, 26)
-
-    def test_PPLNS_function_not_exceeding_block_mining_round(self):
-        """
-        In this scenario we test the functionality of 'PPLNS' function
-        when there is at least two 'solved' share in the database
-        and we call the function with a 'solved' share except the first 'solved' share.
-        In this case the 'N' parameter is less than or equal to the number of current mining round 'valid' shares.
-        We have 5 miners and 10 shares.
-        The third and the last shares are 'solved' and
-        the second, 6th, 7th and the 8th share are 'valid' while
-        the other shares are 'invalid' or 'repetitious'.
-        Then we call 'PPLNS' function for the last share and
-        we expect the amount of balances in following order based on our miners:
-        13, 13, 26, 13
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 10 shares with miners which are created in setUp function
-        for i in range(10):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 2) + 3))
-        # change the status of the thir and the last share to 'solved' for testing 'PPLNS' function
-        shares[2].status = 1
-        shares[9].status = 1
-        # change the status of the second, 6th, 7th and the 8th share to 'valid'
-        shares[1].status = 2
-        shares[5].status = 2
-        shares[6].status = 2
-        shares[7].status = 2
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # call PPLNS function for the last 'solved' share
-        core.utils.PPLNS(shares[9])
-        # retrieve all Balance objects created after calling PPLNS function
-        balances = Balance.objects.filter(share=shares[9])
-        # check the amount of balances using assertEqual
-        self.assertEqual(balances[0].balance, 13)
-        self.assertEqual(balances[1].balance, 13)
-        self.assertEqual(balances[2].balance, 26)
-        self.assertEqual(balances[3].balance, 13)
-
-    def test_PPLNS_function_with_invalid_input_share(self):
-        """
-        In this scenario we test the functionality of 'PPLNS' function when
-        the input share is invalid (it is 'valid', 'invalid' or 'repetitious').
-        We have 5 miners and 10 shares.
-        The first and the last shares are 'solved' and
-        the other shares are not 'solved'.
-        Then we call 'PPLNS' function for one of the not 'solved' shares and
-        we expect it to not exist any balance object corresponding to that not 'solved' input share
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 10 shares with miners which are created in setUp function
-        for i in range(10):
-            # each share is associated to a particular miner ( i % 5 )
-            # the status of each share will be 2, 3 or 4
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 3) + 2))
-        # change the status of the first and the last shares to 'solved'
-        shares[0].status = 1
-        shares[9].status = 1
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # call PPLNS function for an invalid (not solved) share, 9th for example
-        core.utils.PPLNS(shares[8])
-        # use an assertIsNone to check the correctness of 'PPLNS' functionality
-        # in this case we expect no balance associated to the input share
-        self.assertIsNone(Balance.objects.filter(share=shares[8]).first())
-
-    def test_PPLNS_function_2_times_with_same_share(self):
-        """
-        In this scenario we test the functionality of 'PPLNS' function
-        when we call it 2 times with a same input share.
-        We have 5 miners and 23 shares.
-        The first ,the 8th and the 20th shares are 'solved' and
-        the fifth and the last share are 'invalid' and
-        the 17th share which is 'repetitious' while
-        the other shares are 'valid'.
-        Then we call 'PPLNS' function for the 20th share 2 times and
-        we expect it to not exist repetitive balances.
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 23 shares with miners which are created in setUp function
-        for i in range(23):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=2))
-        # change the status of the first, the 8th and 20th share to 'solved'
-        shares[0].status = 1
-        shares[7].status = 1
-        shares[19].status = 1
-        # change the status of the 5th and the last share to 'invalid'
-        shares[4].status = 3
-        shares[22].status = 3
-        # change the status of the 17th share to 'repetitious'
-        shares[16].status = 4
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last solved share
-        last_solved_share = shares[19]
-        # call PPLNS function for the last solved share for the first time
-        core.utils.PPLNS(last_solved_share)
-        # call PPLNS function for the last solved share for the second time
-        core.utils.PPLNS(last_solved_share)
-        # retrieve all Balance objects created after calling PPLNS function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the number of Balance objects created after calling PPLNS function using assertEqual
-        self.assertEqual(balances.count(), 4)
-
-    def test_PPLNS_function_upper_bound(self):
-        """
-        In this scenario we want to test the functionality of 'PPLNS' function while
-        considering the upper bound 'MAX_REWARD' is necessary.
-        We have 5 miners and 3 shares.
-        The first and the last share are 'solved'.
-        The middle share is 'valid'.
-        We expect the reward to not be 65erg in this case.
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 3 shares with miners which are created in setUp function
-        for i in range(3):
-            # each share is associated to a particular miner ( i % 5 )
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(0)), status=1))
-        # change the status of the middle share to 'valid'
-        shares[0].status = 2
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last 'solved' share
-        last_solved_share = Share.objects.filter(status=1).order_by('-created_at').first()
-        # call 'PPLNS' function for the last solved share
-        core.utils.PPLNS(last_solved_share)
-        # retrieve all Balance objects created after calling 'PPLNS' function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the amount of the balance to not be 65erg
-        self.assertNotEqual(balances[0], 65.0)
-
-    def test_PPLNS_function_0_valid_share_in(self):
-        """
-        In this scenario we want to test the functionality of 'PPLNS' function when there
-        is no 'valid' share in the database.
-        We have 5 miners and 2000 shares.
-        The first and the last share are 'solved' while
-        the other shares are 'invalid' or 'repetitious'.
-        Then we call the 'PPLNS' function for the last 'solved' share and
-        we expect that the number of Balance objects be 2 and the amount of the balances be 32.5erg.
-        :return:
-        """
-        # define a list of shares (it is used in bulk_create function)
-        shares = list()
-        # create 1000 shares with miners which are created in setUp function
-        for i in range(1000):
-            # each share is associated to a particular miner ( i % 5 ) and its status is 'invalid'
-            shares.append(
-                Share(share=str(i), miner=Miner.objects.get(public_key=str(i % 5)), status=(i % 2) + 3))
-        # change the status of the first share and the last share to 'solved'
-        shares[0].status = 1
-        shares[999].status = 1
-        # create share objects using shares list and save them to the test database
-        Share.objects.bulk_create(shares)
-        # get the last 'solved' share
-        last_solved_share = Share.objects.filter(status=1).order_by('-created_at').first()
-        # call 'PPLNS' function for the last 'solved' share
-        core.utils.PPLNS(last_solved_share)
-        # retrieve all Balance objects created after calling 'PPLNS' function
-        balances = Balance.objects.filter(share=last_solved_share)
-        # check the number of the Balance objects to be 1
-        self.assertEqual(balances.count(), 2)
-        # check the amount of the balance to be 32.5erg
-        self.assertEqual(balances[0].balance, 32.5)

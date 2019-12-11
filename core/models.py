@@ -1,15 +1,17 @@
 from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
 
-KEY_CHOICES = (
+CONFIGURATION_KEY_CHOICE = (
     ("TOTAL_REWARD", "TOTAL_REWARD"),
     ("MAX_REWARD", "MAX_REWARD"),
-    ("N", "N"))
+    ("PPLNS_N", "PPLNS_N")
+)
 
-DEFAULT_KEY_VALUES = {
+
+CONFIGURATION_DEFAULT_KEY_VALUE = {
     'TOTAL_REWARD': 65,
     'MAX_REWARD': 35,
-    'N': 5,
+    'PPLNS_N': 5,
 }
 
 
@@ -28,12 +30,13 @@ class Share(models.Model):
         ("solved", "solved"),
         ("valid", "valid"),
         ("invalid", "invalid"),
-        ("repetitious", "repetitious"))
+        ("repetitious", "repetitious")
+    )
 
     share = models.CharField(max_length=255, blank=False)
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     status = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
-    transaction_id = models.CharField(max_length=40, blank=True, null=True)
+    transaction_id = models.CharField(max_length=80, blank=True, null=True)
     block_height = models.BigIntegerField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -67,18 +70,18 @@ class ConfigurationManager(models.Manager):
         :param attr:
         :return:
         """
-        if attr in [key for (key, temp) in KEY_CHOICES]:
-            configurations = self.get_queryset().all()
+        if attr in [key for (key, temp) in CONFIGURATION_KEY_CHOICE]:
+            configurations = dict(self.all().values_list('key', 'value'))
             if attr not in configurations:
-                return DEFAULT_KEY_VALUES[attr]
+                return CONFIGURATION_DEFAULT_KEY_VALUE[attr]
             else:
-                return self.get_queryset().get(key=attr)
+                return configurations[attr]
         else:
             return super(ConfigurationManager, self).__getattribute__(attr)
 
 
 class Configuration(models.Model):
-    key = models.CharField(max_length=255, choices=KEY_CHOICES, blank=False)
+    key = models.CharField(max_length=255, choices=CONFIGURATION_KEY_CHOICE, blank=False)
     value = models.FloatField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

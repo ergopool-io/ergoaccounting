@@ -21,7 +21,7 @@ def prop(share):
     # maximum reward : each miner must get reward less than MAX_REWARD
     MAX_REWARD = Configuration.objects.MAX_REWARD
     # check whether the input share is 'solved' or not (valid, invalid, repetitious)
-    if not share.status == 1:
+    if not share.status == "solved":
         return
     # make all requests atomic
     with transaction.atomic():
@@ -32,7 +32,7 @@ def prop(share):
         # finding the penultimate valid share
         penultimate_solved_share = Share.objects.filter(
             created_at__lt=last_solved_share.created_at,
-            status=1
+            status="solved"
         ).order_by('-created_at').first()
         # the end time of this block mining round
         end_time = last_solved_share.created_at
@@ -43,7 +43,7 @@ def prop(share):
             shares = Share.objects.filter(
                 created_at__lte=end_time,
                 created_at__gt=begin_time,
-                status__lte=2,
+                status__in=["solved", "valid"],
             )
         else:
             begin_time = Share.objects.all().order_by('created_at').first().created_at
@@ -51,7 +51,7 @@ def prop(share):
             shares = Share.objects.filter(
                 created_at__lte=end_time,
                 created_at__gte=begin_time,
-                status__lte=2,
+                status__in=["solved", "valid"],
             )
         # total number of valid shares in this block mining round
         total_number_of_shares = shares.count()
@@ -90,9 +90,9 @@ def PPLNS(share):
     # maximum reward : each miner must get reward less than MAX_REWARD
     MAX_REWARD = Configuration.objects.MAX_REWARD
     # 'PPLNS' parameter
-    N = Configuration.objects.N
+    N = Configuration.objects.PPLNS_N
     # check whether the input share is 'solved' or not (valid, invalid, repetitious)
-    if not share.status == 1:
+    if not share.status == "solved":
         return
     # make all database requests and queries atomic
     with transaction.atomic():
@@ -101,7 +101,7 @@ def PPLNS(share):
         # retrieve last N 'solved' or 'valid' shares before the input share (the input is included too)
         sliced_shares = Share.objects.filter(
             id__lte=share.id,
-            status__lte=2).order_by('-id')
+            status__in=["solved", "valid"]).order_by('-id')
         if sliced_shares.count() > N:
             sliced_shares = sliced_shares[:N]
         shares = Share.objects.filter(id__in=sliced_shares)
