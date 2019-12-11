@@ -3,9 +3,10 @@ FROM python:3.7
 WORKDIR "/var/www"
 
 RUN mkdir "src"
-COPY requirements.txt /var/www/
-RUN pip3 install uwsgi
 
+COPY requirements.txt /var/www/
+#RUN apt-get update && apt-get install -y cron uwsgi uwsgi-plugin-python3 --no-install-recommends && apt-get autoremove --purge
+RUN pip3 install uwsgi
 RUN pip3 install -r requirements.txt
 
 ADD core/ /var/www/src/core/

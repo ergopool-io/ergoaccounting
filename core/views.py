@@ -33,7 +33,7 @@ class ShareView(viewsets.GenericViewSet,
             serializer.save(status="repetitious", miner=miner)
             _status = "repetitious"
         if _status == "solved":
-            prop(Share.objects.get(share=_share, status=1))
+            prop(Share.objects.get(share=_share, status="solved"))
 
 
 class BalanceView(viewsets.GenericViewSet,
@@ -97,7 +97,7 @@ class DashboardView(viewsets.GenericViewSet,
         return self.get_response(request)
 
     def retrieve(self, request, *args, **kwargs):
-        return self.get_response(request, kwargs.get("pk"))
+        return self.get_response(request, kwargs.get("pk").lower())
 
     def get_response(self, request, pk=None):
         """
@@ -125,8 +125,8 @@ class DashboardView(viewsets.GenericViewSet,
 
         # Shares of this round and balances of user
         round_shares = miners.values('public_key').annotate(
-            share_count=Count('id', filter=Q(share__created_at__gt=last_solved_timestamp, share__status="valid")),
-            invalid_share_count=Count('id', filter=Q(share__created_at__gt=last_solved_timestamp, share__status="invalid")),
+            valid_shares=Count('id', filter=Q(share__created_at__gt=last_solved_timestamp, share__status="valid")),
+            invalid_shares=Count('id', filter=Q(share__created_at__gt=last_solved_timestamp, share__status="invalid")),
             immature=Sum('share__balance__balance', filter=Q(share__balance__status=1)),
             mature=Sum('share__balance__balance', filter=Q(share__balance__status=2)),
             withdraw=Sum('share__balance__balance', filter=Q(share__balance__status=3)),
@@ -136,8 +136,8 @@ class DashboardView(viewsets.GenericViewSet,
         miners_info = dict()
         for item in round_shares:
             miners_info[item['public_key']] = dict()
-            miners_info[item['public_key']]['round_valid_shares'] = item['share_count']
-            miners_info[item['public_key']]['round_invalid_shares'] = item['invalid_share_count']
+            miners_info[item['public_key']]['round_valid_shares'] = item['valid_shares']
+            miners_info[item['public_key']]['round_invalid_shares'] = item['invalid_shares']
             miners_info[item['public_key']]['immature'] = item['immature'] if item['immature'] else 0
             miners_info[item['public_key']]['mature'] = item['mature'] if item['mature'] else 0
             miners_info[item['public_key']]['withdraw'] = item['withdraw'] if item['withdraw'] else 0
