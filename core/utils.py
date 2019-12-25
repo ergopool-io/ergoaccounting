@@ -1,6 +1,8 @@
-from django.db.models import Count
+from django.db.models import Count, Q, Sum
 from django.db import transaction
 from .models import Share, Balance, Configuration
+from django.utils import timezone
+
 
 
 def prop(share):
@@ -121,3 +123,31 @@ def PPLNS(share):
         # create and save balances to database
         Balance.objects.bulk_create(balances)
     return
+
+
+def compute_hash_rate(by, to=timezone.now(), pk=None):
+    """
+    Function for calculate hash_rate between two time_stamp for a specific public_key or all
+    miners in that round.
+    :param by: timestamp for start period
+    :param to: timestamp for end period if `to` not exist set default now time.
+    :param pk: In the event that pk there is.
+    :return: a json of public_key and hash_rate them and total hash_rate
+    """
+    if pk:
+        shares = Share.objects.values('miner__public_key').filter(miner__public_key=pk).filter(
+            Q(status='valid') | Q(status='solved'), created_at__range=(by, to)).annotate(Sum('difficulty'))
+    else:
+        shares = Share.objects.values('miner__public_key').filter(
+            Q(status='valid') | Q(status='solved'), created_at__range=(by, to)).annotate(Sum('difficulty'))
+
+    time = (to - by).total_seconds()
+    miners = dict()
+    total_hash_rate = 0
+    for share in shares:
+        miners[share['miner__public_key']] = dict()
+        miners[share['miner__public_key']]['hash_rate'] = int((share['difficulty__sum'] / time) + 1)
+        total_hash_rate = total_hash_rate + share['difficulty__sum'] if not pk else 0
+
+    miners.update({'total_hash_rate': int((total_hash_rate / time) + 1)}) if not pk else None
+    return miners

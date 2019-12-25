@@ -4,10 +4,11 @@ from .models import *
 
 class ShareSerializer(serializers.ModelSerializer):
     miner = serializers.CharField()
+    difficulty = serializers.IntegerField()
 
     class Meta:
         model = Share
-        fields = ['share', 'miner', 'status', 'transaction_id', 'block_height']
+        fields = ['share', 'miner', 'status', 'transaction_id', 'block_height', 'difficulty']
         write_only_fields = ['transaction_id', 'block_height']
 
     def validate(self, attrs):

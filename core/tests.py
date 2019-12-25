@@ -1,10 +1,10 @@
 import random
 import string
 import uuid
-from django.test import TestCase, Client
+from django.test import TestCase, Client, TransactionTestCase
 from django.utils import timezone
 from mock import patch
-
+from core.models import Miner, Share
 import core.utils
 from .views import *
 from datetime import datetime, timedelta
@@ -27,7 +27,8 @@ class ShareTestCase(TestCase):
         data = {'share': '1',
                 'miner': '1',
                 'nonce': '1',
-                'status': '2'}
+                'status': '2',
+                'difficulty': 123456}
         self.client.post('/shares/', data, format='json')
         self.assertTrue(mocked_call_prop.isCalled())
 
@@ -37,7 +38,8 @@ class ShareTestCase(TestCase):
         data = {'share': '1',
                 'miner': '1',
                 'nonce': '1',
-                'status': '2'}
+                'status': '2',
+                'difficulty': 123456}
         self.client.post('/shares/', data, format='json')
         self.assertFalse(mocked_not_call_prop.called)
 
@@ -50,7 +52,8 @@ class ShareTestCase(TestCase):
         data = {'share': share,
                 'miner': '1',
                 'nonce': '1',
-                'status': '1'}
+                'status': '1',
+                'difficulty': 123456}
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -64,7 +67,8 @@ class ShareTestCase(TestCase):
                 'miner': '1',
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
-                'status': '1'}
+                'status': '1',
+                'difficulty': 123456}
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -79,7 +83,8 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
-                'status': 'solved'}
+                'status': 'solved',
+                'difficulty': 123456}
         self.client.post('/shares/', data, format='json')
         self.assertTrue(Share.objects.filter(share=share).exists())
 
@@ -94,7 +99,8 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
-                'status': 'valid'}
+                'status': 'valid',
+                'difficulty': 123456}
         self.client.post('/shares/', data, format='json')
         self.assertEqual(Share.objects.filter(share=share).count(), 1)
         transaction = Share.objects.filter(share=share).first()
@@ -122,7 +128,8 @@ class PropFunctionTest(TestCase):
         shares = [Share.objects.create(
             share=str(i),
             miner=miners[i % 3],
-            status="solved" if i in [14, 34, 35] else "valid" if i % 2 == 0 else "invalid"
+            status="solved" if i in [14, 34, 35] else "valid" if i % 2 == 0 else "invalid",
+            difficulty=1000
         )for i in range(36)]
         # set create date for each shares to make them a sequence valid
         start_date = timezone.now() + timedelta(seconds=-100)
@@ -221,17 +228,17 @@ class DashboardTestCase(TestCase):
         # Create shares
         shares = [
             Share.objects.create(share=random_string(), miner=miners[0], status="solved",
-                                 created_at=self.now),
+                                 created_at=self.now, difficulty=1000),
             Share.objects.create(share=random_string(), miner=miners[0], status="valid",
-                                 created_at=self.now + timedelta(minutes=1)),
+                                 created_at=self.now + timedelta(minutes=1), difficulty=1000),
             Share.objects.create(share=random_string(), miner=miners[0], status="valid",
-                                 created_at=self.now + timedelta(minutes=2)),
+                                 created_at=self.now + timedelta(minutes=2), difficulty=1000),
             Share.objects.create(share=random_string(), miner=miners[0], status="invalid",
-                                 created_at=self.now + timedelta(minutes=3)),
+                                 created_at=self.now + timedelta(minutes=3), difficulty=1000),
             Share.objects.create(share=random_string(), miner=miners[1], status="valid",
-                                 created_at=self.now + timedelta(minutes=4)),
+                                 created_at=self.now + timedelta(minutes=4), difficulty=1000),
             Share.objects.create(share=random_string(), miner=miners[1], status="valid",
-                                 created_at=self.now + timedelta(minutes=5)),
+                                 created_at=self.now + timedelta(minutes=5), difficulty=1000),
         ]
 
         # Create balances
@@ -257,6 +264,7 @@ class DashboardTestCase(TestCase):
             'round_valid_shares': 4,
             'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
+            'hash_rate': 1
             'users': {
                 'abc': {
                     "round_valid_shares": 2,
@@ -280,6 +288,7 @@ class DashboardTestCase(TestCase):
             'round_valid_shares': 4,
             'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
+            'hash_rate': 1,
             'users': {
                 'abc': {
                     "round_valid_shares": 2,
@@ -326,6 +335,7 @@ class DashboardTestCase(TestCase):
             'round_valid_shares': 4,
             'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
+            'hash_rate': 1,
             'users': {
                 'abc': {
                     "round_valid_shares": 2,
@@ -476,7 +486,8 @@ class PPLNSFunctionTest(TestCase):
         shares = [Share.objects.create(
             share=str(i),
             miner=miners[int(i / 2) % 3],
-            status="solved" if i in [14, 44, 45] else "valid" if i % 2 == 0 else "invalid"
+            status="solved" if i in [14, 44, 45] else "valid" if i % 2 == 0 else "invalid",
+            difficulty=1000
         )for i in range(46)]
         # set create date for each shares to make them a sequence valid
         start_date = timezone.now() + timedelta(seconds=-100)
@@ -544,3 +555,53 @@ class PPLNSFunctionTest(TestCase):
         Share.objects.all().delete()
         # delete all Miner objects
         Miner.objects.all().delete()
+
+
+class ComputeHashRateTest(TransactionTestCase):
+    """
+    For test function compute_hash_rate for calculate
+     hash_rate for one public_key or all public_key between two timestamp.
+
+    """
+    reset_sequences = True
+
+    def test_compute_hash_rate(self):
+        """
+        In this function create 2 miner and 4 share for calculate hash rate between two timestamp.
+        Pass two time_stamp to function compute_hash_rate and get hash_rate between this time_stamps that are
+         'valid' or 'solved'.
+        :return:
+        """
+        # Create objects for test
+
+        Miner.objects.create(nick_name="moein", public_key="12345678976543", created_at=datetime(2019, 12, 22, 8, 33, 45, 395985),
+                             updated_at=datetime(2019, 12, 22, 8, 33, 45, 395985))
+        Miner.objects.create(nick_name="amir", public_key="869675768342", created_at=datetime(2019, 12, 23, 8, 33, 45, 395985),
+                             updated_at=datetime(2019, 12, 23, 8, 33, 45, 395985))
+        share = Share.objects.create(share="12345", miner_id=1, block_height=23456,
+                                     transaction_id="234567uhgt678", status="solved", difficulty=4253524523)
+        share.created_at = "2019-12-22 14:18:57.395985+00"
+        share.updated_at = "2019-12-22 14:18:57.395985+00"
+        share.save()
+        share = Share.objects.create(share="234567", miner_id=1, block_height=23456,
+                                     transaction_id="234567uhgt678", status="valid", difficulty=4253524523)
+        share.created_at = "2019-12-22 18:18:57.376576+00"
+        share.updated_at = "2019-12-22 18:18:57.376576+00"
+        share.save()
+        share = Share.objects.create(share="8765678", miner_id=2, block_height=23456,
+                                     transaction_id="234567uhgt678", status="solved", difficulty=4253524523)
+        share.created_at = "2019-12-22 20:05:00.376576+00"
+        share.updated_at = "2019-12-22 20:05:00.376576+00"
+        share.save()
+        share = Share.objects.create(share="345678", miner_id=2, block_height=23456,
+                                     transaction_id="234567uhgt678", status="valid", difficulty=4253524523)
+        share.created_at = "2019-12-22 20:00:00.376576+00"
+        share.updated_at = "2019-12-22 20:00:00.376576+00"
+        share.save()
+        # Calculate hash rate
+        miners = compute_hash_rate(datetime(2019, 12, 22, 20, 5, 00, 370000, tzinfo=timezone.utc),
+                                   datetime(2019, 12, 24, 6, 39, 28, 887529, tzinfo=timezone.utc))
+
+        # check the function compute_hash_rate
+        self.assertEqual(miners, {'869675768342': {'hash_rate': 34174},
+                                  'total_hash_rate': 34174})
