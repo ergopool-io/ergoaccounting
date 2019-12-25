@@ -5,9 +5,6 @@ before_script:
   - apt-get update -qy
   - apt-get install -y postgresql-11 postgresql-client-11 postgresql-contrib-11 sudo screen
   - pip3 install -r requirements.txt
-#  - cp config/production.gitlab.py ErgoApi/production.py
-#  # this configures Django application to use attached postgres database that is run on `postgres` host
-#  - pip3 install -r requirements.txt
 
 stages:
   - test

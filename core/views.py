@@ -1,11 +1,13 @@
 from django.db.models import Q, Count, Sum
-from datetime import datetime
+from datetime import datetime, timedelta
 from rest_framework import filters
 from rest_framework import viewsets, mixins
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from core.utils import compute_hash_rate
+from django.utils import timezone
 
 from .serializers import *
+from core.models import Configuration
 from .utils import prop
 
 
@@ -131,8 +133,7 @@ class DashboardView(viewsets.GenericViewSet,
             mature=Sum('share__balance__balance', filter=Q(share__balance__status=2)),
             withdraw=Sum('share__balance__balance', filter=Q(share__balance__status=3)),
         )
-
-        # Dictionary of miners with their balances and shares for response
+        miners_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME))
         miners_info = dict()
         for item in round_shares:
             miners_info[item['public_key']] = dict()
@@ -141,11 +142,14 @@ class DashboardView(viewsets.GenericViewSet,
             miners_info[item['public_key']]['immature'] = item['immature'] if item['immature'] else 0
             miners_info[item['public_key']]['mature'] = item['mature'] if item['mature'] else 0
             miners_info[item['public_key']]['withdraw'] = item['withdraw'] if item['withdraw'] else 0
+            if item['public_key'] in miners_hash_rate:
+                miners_info[item['public_key']]['hash_rate'] = miners_hash_rate[item['public_key']]['hash_rate']
 
         response = {
             'round_valid_shares': total_count.get("valid", 0),
             'round_invalid_shares': total_count.get("invalid", 0),
             'timestamp': last_solved_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            'hash_rate': miners_hash_rate['total_hash_rate'],
             'users': miners_info
         }
         return Response(response)
