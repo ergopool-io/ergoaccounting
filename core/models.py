@@ -1,10 +1,12 @@
 from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
 
+
 CONFIGURATION_KEY_CHOICE = (
     ("TOTAL_REWARD", "TOTAL_REWARD"),
     ("MAX_REWARD", "MAX_REWARD"),
-    ("PPLNS_N", "PPLNS_N")
+    ("PPLNS_N", "PPLNS_N"),
+    ("PERIOD_TIME", "PERIOD_TIME")
 )
 
 
@@ -12,6 +14,7 @@ CONFIGURATION_DEFAULT_KEY_VALUE = {
     'TOTAL_REWARD': 65,
     'MAX_REWARD': 35,
     'PPLNS_N': 5,
+    'PERIOD_TIME': 24*60*60
 }
 
 
@@ -37,6 +40,7 @@ class Share(models.Model):
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     status = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
     transaction_id = models.CharField(max_length=80, blank=True, null=True)
+    difficulty = models.BigIntegerField(blank=False)
     block_height = models.BigIntegerField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
