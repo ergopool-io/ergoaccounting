@@ -1,5 +1,8 @@
 from rest_framework import serializers
 from .models import *
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ShareSerializer(serializers.ModelSerializer):
@@ -21,8 +24,10 @@ class ShareSerializer(serializers.ModelSerializer):
         # status is solved
         if attrs.get("status") == 1:
             if not attrs.get("transaction_id"):
+                logger.debug('Transaction id is not provided for solved share.')
                 raise serializers.ValidationError("transaction id is required when solved solution received")
             if not attrs.get("block_height"):
+                logger.debug('Block height is not provided for solved share.')
                 raise serializers.ValidationError("block height is required when solved solution received")
         else:
             if 'transaction_id' in attrs:
