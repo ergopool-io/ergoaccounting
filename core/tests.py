@@ -8,6 +8,9 @@ from core.models import Miner, Share
 import core.utils
 from .views import *
 from datetime import datetime, timedelta
+from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS
+import json
+import os
 
 
 def random_string(length=10):
@@ -605,3 +608,141 @@ class ComputeHashRateTest(TransactionTestCase):
         # check the function compute_hash_rate
         self.assertEqual(miners, {'869675768342': {'hash_rate': 34174},
                                   'total_hash_rate': 34174})
+
+
+class BlockTestCase(TestCase):
+    """
+    Test for different modes call api /blocks
+    Api using limit and offset, period time, sortBy and sortDirection and check that this block mined by miner of pool
+     if mined there was flag "inpool": True
+    """
+    def setUp(self):
+        """
+        Create a miner and after that create 3 objects => solved = 2 and valid = 1
+        :return:
+        """
+        # Create a miner in data_base
+        miner = Miner.objects.create(nick_name="test", public_key="1245",
+                                     created_at=datetime(2019, 12, 20, 8, 33, 45, 395985),
+                                     updated_at=datetime(2019, 12, 20, 8, 33, 45, 395985))
+
+        # Create 3 objects => solved = 2 and valid = 1
+        i = 2
+        while i <= 4:
+            if i == 4:
+                share = Share.objects.create(share=str(i), miner=miner, block_height=i, transaction_id=str(i),
+                                             status="valid", difficulty=i)
+            else:
+                share = Share.objects.create(share=str(i), miner=miner, block_height=i, transaction_id=str(i),
+                                             status="solved", difficulty=i)
+
+            share.created_at = datetime(2020, 1, 1, 8 + i, 59, 20, 395985, tzinfo=timezone.utc)
+            share.updated_at = datetime(2020, 1, 1, 8 + i, 59, 20, 395985, tzinfo=timezone.utc)
+            share.save()
+            i = i + 1
+
+    def mocked_get_request(*args, **kwargs):
+        """
+        mock requests with method get for urls 'blocks'
+        """
+        class MockResponse:
+            def __init__(self, json_data):
+                self.json_data = json_data
+
+            def json(self):
+                return self.json_data
+        if args[0] == ERGO_EXPLORER_ADDRESS + "/blocks/?offset=1&limit=4":
+            with open("core/data_mock_testing/test_get_offset_limit.json", "r") as read_file:
+                response = json.load(read_file)
+            return MockResponse(response)
+        if "/blocks/?sortBy=height&sortDirection=asc" in args[0]:
+            with open("core/data_mock_testing/test_get_sortBy_sortDirection.json", "r") as read_file:
+                response = json.load(read_file)
+            return MockResponse(response)
+        if "/blocks/?endDate=1579811399999&startDate=1577824200000" in args[0]:
+            with open("core/data_mock_testing/test_get_period_time.json", "r") as read_file:
+                response = json.load(read_file)
+            return MockResponse(response)
+
+        return MockResponse(None)
+
+    @patch("requests.get", side_effect=mocked_get_request)
+    def test_get_offset_limit(self, mock):
+        """
+        Send a http 'get' request for get blocks with => offset = 1 and limit = 4 in this test, we must get 4 blocks and
+         set the inPool  flag to True if it has been mined by the miner in the pool
+        """
+
+        # Send a http 'get' request for get blocks with limits => offset = 1 and limit = 4
+        response = self.client.get('/blocks/?offset=1&limit=4')
+        # check the status of the response
+        self.assertEqual(response.status_code, 200)
+        response = response.json()
+        # check the content of the response
+        # For check flag ' inPool'
+        blocks_pool = [3, 2]
+        blocks_pool_result = []
+        # For Check true block heights
+        heights = [4, 3, 2, 1]
+        heights_result = []
+        for res in response['results']['items']:
+            heights_result.append(res['height'])
+            if res['inPool']:
+                blocks_pool_result.append(res['height'])
+
+        self.assertEqual(heights_result, heights)
+        self.assertEqual(blocks_pool_result, blocks_pool)
+
+    @patch("requests.get", side_effect=mocked_get_request)
+    def test_get_sort_by_direction(self, mock):
+        """
+        Send a http 'get' request for get blocks with sort according to height and direction asc.
+        """
+
+        # Send a http 'get' request for get blocks with sort according to height and Direction asc
+        response = self.client.get('/blocks/?sortBy=height&sortDirection=asc')
+        # check the status of the response
+        self.assertEqual(response.status_code, 200)
+        response = response.json()
+        # check the content of the response
+        # For check flag ' inPool'
+        blocks_pool = [2, 3]
+        blocks_pool_result = []
+        # For Check true block heights
+        heights = [1, 2, 3, 4]
+        heights_result = []
+        for res in response['results']['items']:
+            heights_result.append(res['height'])
+            if res['inPool']:
+                blocks_pool_result.append(res['height'])
+
+        self.assertEqual(heights_result, heights)
+        self.assertEqual(blocks_pool_result, blocks_pool)
+
+    @patch("requests.get", side_effect=mocked_get_request)
+    def test_get_period_time(self, mock):
+        """
+        Send a http 'get' request for get blocks in period time. in this test we send endDate=1579811399999 and
+         startDate=1577824200000 and we want to get blocks between this times.
+        """
+        # send a http 'get' request for get blocks in period time.
+        response = self.client.get('/blocks/?endDate=1579811399999&startDate=1577824200000')
+        # check the status of the response
+        self.assertEqual(response.status_code, 200)
+        response = response.json()
+        # check the content of the response
+        # For check flag ' inPool'
+        blocks_pool = [3, 2]
+        blocks_pool_result = []
+        # For Check true block heights
+        heights = [4, 3, 2, 1]
+        heights_result = []
+        for res in response['results']['items']:
+            heights_result.append(res['height'])
+            if res['inPool']:
+                blocks_pool_result.append(res['height'])
+
+        self.assertEqual(heights_result, heights)
+        self.assertEqual(blocks_pool_result, blocks_pool)
+
+

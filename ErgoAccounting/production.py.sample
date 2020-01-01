@@ -17,6 +17,15 @@ DATABASES = {
 # Allowed Hosts
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
 
+# Explorer ergo
+ERGO_EXPLORER_ADDRESS = "https://api.ergoplatform.com/"
+
+# Set limitation for get blocks from explorer and query on database
+MAX_PAGINATION = 200
+
+# For pagination requests
+DEFAULT_PAGINATION = 50
+
 # Logging config
 # You may want to uncomment mail handler in production!
 # you should get the logger like this whenever you need it: logging.getLogger(__name__)
