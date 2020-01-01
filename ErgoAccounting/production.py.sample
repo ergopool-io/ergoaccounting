@@ -1,3 +1,5 @@
+import os
+
 # Database
 # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
 
@@ -14,4 +16,45 @@ DATABASES = {
 
 # Allowed Hosts
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
+
+# Logging config
+# You may want to uncomment mail handler in production!
+# you should get the logger like this whenever you need it: logging.getLogger(__name__)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[%(asctime)s] %(levelname)-8s [%(module)s:%(funcName)s:%(lineno)d]: %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': LOG_LEVEL,
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'formatter': 'verbose',
+            'filename': os.path.join(BASE_DIR, '.important.log')
+        },
+        # 'mail': {
+        #     'level': 'CRITICAL',
+        #     'class': 'django.utils.log.AdminEmailHandler',
+        #     'formatter': 'verbose',
+        # },
+    },
+    'loggers': {
+        'core': {
+            'handlers': ['console', 'file'],
+            'propagate': True,
+            'level': LOG_LEVEL,
+        }
+    }
+}
 
