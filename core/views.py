@@ -1,11 +1,14 @@
 from django.db.models import Q, Count, Sum
 from datetime import datetime, timedelta
 from rest_framework import filters
-from rest_framework import viewsets, mixins
+from rest_framework import viewsets, mixins, status
 from rest_framework.response import Response
 from core.utils import compute_hash_rate
 from django.utils import timezone
+import requests
 import logging
+from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS, MAX_PAGINATION, DEFAULT_PAGINATION
+from rest_framework.pagination import PageNumberPagination
 
 from .serializers import *
 from core.models import Configuration
@@ -164,3 +167,76 @@ class DashboardView(viewsets.GenericViewSet,
             'users': miners_info
         }
         return Response(response)
+
+
+class BlockView(viewsets.GenericViewSet):
+    pagination_class = PageNumberPagination
+    pagination_class.page_size = DEFAULT_PAGINATION
+
+    def get_queryset(self):
+        """
+        Return response of address Explorer of ergo
+        This function get response and check data if a block mined by miner of in pool set flag 'inPool': True in json item
+        In this function set limit in number get block from explorer
+        :return:mined block
+        """
+        url = ''
+        # Create url for send to explorer and set limit for get blocks.
+        for param in self.request.query_params:
+            # Remove param page from request to Explorer
+            if param == 'page':
+                continue
+            query = self.request.query_params.get(param)
+            # limitation use for limited query on data_base with get limit block
+            if param == 'limit' and int(query) > MAX_PAGINATION:
+                query = MAX_PAGINATION
+            url = url + param + '=' + query if url == '' else url + '&' + param + '=' + query
+        # if in request not use limit set limitation policy pool
+        if 'limit' not in self.request.query_params:
+            url = url + '&limit=' + str(MAX_PAGINATION)
+        try:
+            # Send request to Ergo_explorer for get blocks
+            response = requests.get(ERGO_EXPLORER_ADDRESS + "/blocks/?" + url).json()
+            logger.info("Get response from url {}".format(url))
+        except requests.exceptions.RequestException as e:
+            logger.error("Can not resolve response from explorer")
+            logger.error(e)
+            return {'status': 'error'}
+        heights = list()
+        for item in response['items']:
+            heights.append(item.get('height'))
+        # get shares that mined block in our pool and are in response of explorer
+        # and set flag 'inpool' on this block
+        shares = Share.objects.values('block_height').filter(Q(status='solved'), block_height__in=heights)
+        heights_share = list()
+        for share in shares:
+            heights_share.append(share['block_height'])
+        for item in response.get('items'):
+            if item.get('height') in heights_share:
+                item.update({"inPool": True})
+                logger.info("Set flag inPool true for height {}".format(item.get('height')))
+            else:
+                item.update({"inPool": False})
+        return response
+
+    def list(self, request):
+        queryset = self.get_queryset()
+        # set pagination on response
+        try:
+            page = self.paginate_queryset(queryset['items'])
+        except Exception as e:
+            logger.error("Pagination query set have bug.")
+            logger.error(e)
+            return Response({
+                "message": 'No more record.',
+                "data": {}
+                }, status=status.HTTP_404_NOT_FOUND)
+        if page is not None:
+            response = {
+                'items': page,
+                'total': queryset['total']
+            }
+            return self.get_paginated_response(response)
+        logger.debug("Items is None")
+        return Response(
+            {"message": 'There isn\'t record', "data": {}}, status=status.HTTP_200_OK)
