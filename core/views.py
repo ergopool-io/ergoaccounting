@@ -5,10 +5,13 @@ from rest_framework import viewsets, mixins
 from rest_framework.response import Response
 from core.utils import compute_hash_rate
 from django.utils import timezone
+import logging
 
 from .serializers import *
 from core.models import Configuration
 from .utils import prop
+
+logger = logging.getLogger(__name__)
 
 
 class ShareView(viewsets.GenericViewSet,
@@ -25,16 +28,21 @@ class ShareView(viewsets.GenericViewSet,
         """
         miner = Miner.objects.filter(public_key=serializer.validated_data['miner'].lower()).first()
         if not miner:
+            logger.info('Miner does not exist, creating one with pk {}'.format(
+                serializer.validated_data['miner'].lower()))
             miner = Miner.objects.create(public_key=serializer.validated_data['miner'].lower())
         _share = serializer.validated_data['share']
         _status = serializer.validated_data['status']
         rep_share = Share.objects.filter(share=_share)
         if not rep_share:
+            logger.info('New share, saving.')
             serializer.save(miner=miner)
         else:
+            logger.info('Repetitious share, saving.')
             serializer.save(status="repetitious", miner=miner)
             _status = "repetitious"
         if _status == "solved":
+            logger.info('Solved share, saving.')
             prop(Share.objects.get(share=_share, status="solved"))
 
 
@@ -81,8 +89,10 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
         value = serializer.validated_data['value']
         configurations = Configuration.objects.filter(key=key)
         if not configurations:
+            logger.info('Saving new configuration.')
             serializer.save()
         else:
+            logger.info('Updating configuration')
             configuration = Configuration.objects.get(key=key)
             configuration.value = value
             configuration.save()
@@ -134,6 +144,7 @@ class DashboardView(viewsets.GenericViewSet,
             withdraw=Sum('share__balance__balance', filter=Q(share__balance__status=3)),
         )
         miners_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME))
+        logger.info('Current hash rate: {}'.format(miners_hash_rate))
         miners_info = dict()
         for item in round_shares:
             miners_info[item['public_key']] = dict()
