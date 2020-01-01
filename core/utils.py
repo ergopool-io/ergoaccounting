@@ -2,7 +2,9 @@ from django.db.models import Count, Q, Sum
 from django.db import transaction
 from .models import Share, Balance, Configuration
 from django.utils import timezone
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 def prop(share):
@@ -18,6 +20,7 @@ def prop(share):
     If the input share isn't 'solved', it will be invalid and the function do nothing.
     :return: nothing
     """
+    logger.info('running proportional algorithm.')
     # total reward per solved block
     TOTAL_REWARD = Configuration.objects.TOTAL_REWARD
     # maximum reward : each miner must get reward less than MAX_REWARD
@@ -57,6 +60,8 @@ def prop(share):
             )
         # total number of valid shares in this block mining round
         total_number_of_shares = shares.count()
+        logger.info('Number of shares in this round: {}'.format(total_number_of_shares))
+
         # a list of (miner's primary key, miner's valid shares) for this block mining round
         miners_share_count = shares.values_list('miner').annotate(Count('miner'))
         # define "balances" as a list to create and save balance objects
@@ -70,6 +75,8 @@ def prop(share):
             )
         # create and save balances to database
         Balance.objects.bulk_create(balances)
+        logger.info('Balance created for all miners related to this round.')
+
     return
 
 
@@ -87,6 +94,7 @@ def PPLNS(share):
     If the input share isn't 'solved', it will be invalid and the function do nothing.
     :return: nothing
     """
+    logger.info('Running PPLNS algorithm.')
     # total reward per solved block
     TOTAL_REWARD = Configuration.objects.TOTAL_REWARD
     # maximum reward : each miner must get reward less than MAX_REWARD
@@ -122,6 +130,8 @@ def PPLNS(share):
             )
         # create and save balances to database
         Balance.objects.bulk_create(balances)
+        logger.info('Balance created for all miners related to this round.')
+
     return
 
 
@@ -134,6 +144,7 @@ def compute_hash_rate(by, to=timezone.now(), pk=None):
     :param pk: In the event that pk there is.
     :return: a json of public_key and hash_rate them and total hash_rate
     """
+    logger.info('computing hash for pk: {}'.format(pk))
     if pk:
         shares = Share.objects.values('miner__public_key').filter(miner__public_key=pk).filter(
             Q(status='valid') | Q(status='solved'), created_at__range=(by, to)).annotate(Sum('difficulty'))
