@@ -354,10 +354,11 @@ class DashboardTestCase(TestCase):
 class ConfigurationAPITest(TestCase):
     """
     Test class for Configuration API
-    This class has 3 test function based on 3 following general situations:
+    Test scenarios:
     1) using http 'get' method to retrieve a list of existing configurations
     2) using http 'post' method to create a new configuration
     3) using http 'post' method to update an existing configuration
+    4) type conversion test, after retrieving the value, it must be converted to valid value_type
     """
 
     def setUp(self):
@@ -383,8 +384,8 @@ class ConfigurationAPITest(TestCase):
         expected_response = []
         # create a json like dictionary for any key in keys
         for key in keys:
-            Configuration.objects.create(key=key, value=1)
-            expected_response.append({'key': key, 'value': 1.0})
+            Configuration.objects.create(key=key, value='1')
+            expected_response.append({'key': key, 'value': '1'})
         # send a http 'get' request to the configuration endpoint
         response = self.client.get('/conf/')
         # check the status of the response
@@ -406,7 +407,7 @@ class ConfigurationAPITest(TestCase):
         # send http 'post' request to the configuration endpoint and validate the result
         for key in keys:
             # send http 'post' request to the endpoint
-            response = self.client.post('/conf/', {'key': key, 'value': 1})
+            response = self.client.post('/conf/', {'key': key, 'value': '1'})
             # check the status of the response
             self.assertEqual(response.status_code, 201)
             # retrieve the new created configuration from database
@@ -414,7 +415,7 @@ class ConfigurationAPITest(TestCase):
             # check whether the above object is created and saved to database or not
             self.assertIsNotNone(configuration)
             # check the value of the new created object
-            self.assertEqual(configuration.value, 1)
+            self.assertEqual(configuration.value, '1')
 
     def test_configuration_api_post_method_update(self):
         """
@@ -430,9 +431,9 @@ class ConfigurationAPITest(TestCase):
         # send http 'post' request to the configuration endpoint and validate the result
         for key in keys:
             # create a configuration object to check the functionality of 'post' method
-            Configuration.objects.create(key=key, value=1)
+            Configuration.objects.create(key=key, value='1')
             # send http 'post' request to the endpoint
-            response = self.client.post('/conf/', {'key': key, 'value': 2})
+            response = self.client.post('/conf/', {'key': key, 'value': '2'})
             # check the status of the response
             self.assertEqual(response.status_code, 201)
             # retrieve the new created configuration from database
@@ -440,7 +441,19 @@ class ConfigurationAPITest(TestCase):
             # check whether the above object is created and saved to database or not
             self.assertEqual(configurations.count(), 1)
             # check the value of the new created object
-            self.assertEqual(configurations.first().value, 2)
+            self.assertEqual(configurations.first().value, '2')
+
+    def test_value_type_conversion(self):
+        keys = [key for (key, temp) in CONFIGURATION_KEY_CHOICE]
+        for i, key in enumerate(keys):
+            Configuration.objects.create(key=key, value='1')
+
+        # checking validity of conversion
+        for i, key in enumerate(keys):
+            val = Configuration.objects.__getattr__(key)
+            val_type = CONFIGURATION_KEY_TO_TYPE[key]
+
+            self.assertEqual(locate(val_type), type(val))
 
     def test_available_config_restore(self):
         """
