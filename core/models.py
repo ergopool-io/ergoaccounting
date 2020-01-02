@@ -1,5 +1,9 @@
 from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
+from pydoc import locate
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 CONFIGURATION_KEY_CHOICE = (
@@ -9,12 +13,18 @@ CONFIGURATION_KEY_CHOICE = (
     ("PERIOD_TIME", "PERIOD_TIME")
 )
 
+CONFIGURATION_KEY_TO_TYPE = {
+    "TOTAL_REWARD": "float",
+    "MAX_REWARD": "float",
+    "PPLNS_N": "int",
+    "PERIOD_TIME": "float"
+}
 
 CONFIGURATION_DEFAULT_KEY_VALUE = {
     'TOTAL_REWARD': 65,
     'MAX_REWARD': 35,
     'PPLNS_N': 5,
-    'PERIOD_TIME': 24*60*60
+    'PERIOD_TIME': 24 * 60 * 60
 }
 
 
@@ -76,17 +86,30 @@ class ConfigurationManager(models.Manager):
         """
         if attr in [key for (key, temp) in CONFIGURATION_KEY_CHOICE]:
             configurations = dict(self.all().values_list('key', 'value'))
-            if attr not in configurations:
-                return CONFIGURATION_DEFAULT_KEY_VALUE[attr]
-            else:
-                return configurations[attr]
+            if attr in configurations:
+                val = configurations[attr]
+                val_type = CONFIGURATION_KEY_TO_TYPE[attr]
+
+                # trying to convert value to value_type
+                try:
+                    val = locate(val_type)(val)
+                    return val
+
+                except:
+                    # failed to convert, return default value
+                    logger.error('Problem in configuration; {} with value {} is not compatible with type {}'
+                                 .format(attr, val, val_type))
+                    return CONFIGURATION_DEFAULT_KEY_VALUE[attr]
+
+            return CONFIGURATION_DEFAULT_KEY_VALUE[attr]
+
         else:
             return super(ConfigurationManager, self).__getattribute__(attr)
 
 
 class Configuration(models.Model):
     key = models.CharField(max_length=255, choices=CONFIGURATION_KEY_CHOICE, blank=False)
-    value = models.FloatField(default=0)
+    value = models.CharField(max_length=255, blank=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
