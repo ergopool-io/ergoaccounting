@@ -2,137 +2,171 @@ from django.db.models import Count, Q, Sum
 from django.db import transaction
 from .models import Share, Balance, Configuration
 from django.utils import timezone
+import sys
+import abc
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def prop(share):
-    """
-    This function use "proportional algorithm" as a pool mining reward method.
-    In fact "prop" function create a new balance for each miner involving in the mining round and
-    assign a reward based on "proportional algorithm" to balances,
-    by receiving a 'solved' share as input and
-    computing the number of miner's valid shares for each miner
-    between the input share and the last 'solved' share before the input share.
-    :param share: A 'solved' share which lead to creation of a new
-    block in the block chain (in normal situation)
-    If the input share isn't 'solved', it will be invalid and the function do nothing.
-    :return: nothing
-    """
-    logger.info('running proportional algorithm.')
-    # total reward per solved block
-    TOTAL_REWARD = Configuration.objects.TOTAL_REWARD
-    # maximum reward : each miner must get reward less than MAX_REWARD
-    MAX_REWARD = Configuration.objects.MAX_REWARD
-    # check whether the input share is 'solved' or not (valid, invalid, repetitious)
-    if not share.status == "solved":
+class RewardAlgorithm(metaclass=abc.ABCMeta):
+    def perform_logic(self, share):
+        """
+        a pool mining reward method based on number of shares of each miner.
+        In fact this function create a new balance for each miner involving in the mining round and
+        assign a reward based on number of shares of each miner to balances,
+        by receiving a 'solved' share as input and
+        computing the number of miner's valid shares for each miner
+        between the input share and the last 'solved' share before the input share.
+        :param share:
+        :param share: A 'solved' share which lead to creation of a new
+        block in the block chain (in normal situation)
+        If the input share isn't 'solved', it will be invalid and the function do nothing.
+        :return: nothing
+        """
+        logger.info('running {} algorithm'.format(self.__class__.__name__))
+
+        if not self.should_run_reward_algorithm(share):
+            return
+
+        with transaction.atomic():
+            # delete all related balances if it's not the first execution
+            # of prop function (according to the input share)
+            Balance.objects.filter(share=share).delete()
+            # finding the penultimate valid share
+
+            beginning_share = self.get_beginning_share(share.created_at)
+            shares = Share.objects.filter(
+                created_at__lte=share.created_at,
+                created_at__gte=beginning_share.created_at,
+                status__in=["solved", "valid"],
+            )
+
+            # share reward for these shares
+            self.create_balance_from_share(shares, share)
+
         return
-    # make all requests atomic
-    with transaction.atomic():
-        # delete all related balances if it's not the first execution of prop function (according to the input share)
-        Balance.objects.filter(share=share).delete()
-        # define last solved share
-        last_solved_share = share
-        # finding the penultimate valid share
-        penultimate_solved_share = Share.objects.filter(
-            created_at__lt=last_solved_share.created_at,
-            status="solved"
-        ).order_by('-created_at').first()
-        # the end time of this block mining round
-        end_time = last_solved_share.created_at
-        # the beginning time of this block mining round
-        if penultimate_solved_share is not None:
-            begin_time = penultimate_solved_share.created_at
-            # all the valid shares between the two last solved shares
-            shares = Share.objects.filter(
-                created_at__lte=end_time,
-                created_at__gt=begin_time,
-                status__in=["solved", "valid"],
-            )
-        else:
-            begin_time = Share.objects.all().order_by('created_at').first().created_at
-            # all the valid shares before the first solved share
-            shares = Share.objects.filter(
-                created_at__lte=end_time,
-                created_at__gte=begin_time,
-                status__in=["solved", "valid"],
-            )
+
+    @abc.abstractmethod
+    def get_beginning_share(self, considered_time):
+        """
+        This method calculates the first valid share based on the implemented algorithm
+        :param considered_time: shares before this time are considered
+        :return: first valid share based on implemented algorithm
+        """
+        return
+
+    @staticmethod
+    def get_instance():
+        """
+        This method returns an instance of appropriate reward algorithm based on configuration
+        :return: an instance of appropriate reward algorithm
+        """
+        module = sys.modules[__name__]
+        algorithm = Configuration.objects.REWARD_ALGORITHM
+
+        try:
+            class_ = getattr(module, algorithm)
+            logger.info('Reward algorithm is {}'.format(class_))
+            return class_()
+
+        except:
+            logger.error('Defined reward algorithm in configuration is not valid, {}' .format(algorithm))
+            raise ValueError('Defined reward algorithm in configuration is not valid, {}' .format(algorithm))
+
+    def should_run_reward_algorithm(self, share):
+        """
+        evaluates if reward algorithm should be run
+        :param share: last solved share
+        :return: whether reward algorithm should be run or not
+        """
+        # check whether the input share is 'solved' or not (valid, invalid, repetitious)
+        return share.status == 'solved'
+
+    def get_reward_to_share(self):
+        """
+        calculates real reward to share between shares of a round
+        :return: real reward to be shared
+        """
+        # TOTAL_REWARD - FEE
+        return Configuration.objects.TOTAL_REWARD - Configuration.objects.FEE
+
+    def create_balance_from_share(self, shares, last_solved_share):
+        """
+        This method shares the reward between shares of each miner
+        :param shares: all the valid shares to be considered
+        :param last_solved_share: last solved share
+        :return: nothing
+        """
+        # maximum reward : each miner must get reward less than MAX_REWARD
+        MAX_REWARD = Configuration.objects.MAX_REWARD
+        # total reward per solved block, i.e, TOTAL_REWARD - FEE
+        REWARD = self.get_reward_to_share()
         # total number of valid shares in this block mining round
         total_number_of_shares = shares.count()
-        logger.info('Number of shares in this round: {}'.format(total_number_of_shares))
-
         # a list of (miner's primary key, miner's valid shares) for this block mining round
         miners_share_count = shares.values_list('miner').annotate(Count('miner'))
-        # define "balances" as a list to create and save balance objects
-        balances = list()
-        # for each miner, create a new balance and calculate it's reward and save it
-        for (miner_id, share_count) in miners_share_count:
-            balances.append(Balance(
-                miner_id=miner_id,
-                share=last_solved_share,
-                balance=min(MAX_REWARD, TOTAL_REWARD * (share_count / total_number_of_shares)))
-            )
-        # create and save balances to database
-        Balance.objects.bulk_create(balances)
-        logger.info('Balance created for all miners related to this round.')
 
-    return
+        with transaction.atomic():
+            # define "balances" as a list to create and save balance objects
+            balances = list()
+            # for each miner, create a new balance and calculate it's reward and save it
+            for (miner_id, share_count) in miners_share_count:
+                balances.append(Balance(
+                    miner_id=miner_id,
+                    share=last_solved_share,
+                    balance=min(MAX_REWARD, REWARD * (share_count / total_number_of_shares)))
+                )
+
+            # create and save balances to database
+            Balance.objects.bulk_create(balances)
+            logger.info('Balance created for all miners related to this round.')
 
 
-def PPLNS(share):
-    """
-    This function use "PPLNS algorithm" as a pool mining reward method.
-    In fact 'PPLNS' function create a new balance for each miner which
-    has at least one 'valid' share in the last N 'valid' or 'solved' shares
-    before the input 'solved' share (the input is included too).
-    So we retrieve the last 'N' 'solved' or 'valid' shares before
-    the input 'solved' share (the input is included) and then we use 'prop' algorithm
-    to assign rewards to involving miners.
-    :param share: A 'solved' share which lead to creation of a new
-    block in the block chain (in normal situation)
-    If the input share isn't 'solved', it will be invalid and the function do nothing.
-    :return: nothing
-    """
-    logger.info('Running PPLNS algorithm.')
-    # total reward per solved block
-    TOTAL_REWARD = Configuration.objects.TOTAL_REWARD
-    # maximum reward : each miner must get reward less than MAX_REWARD
-    MAX_REWARD = Configuration.objects.MAX_REWARD
-    # 'PPLNS' parameter
-    N = Configuration.objects.PPLNS_N
-    # check whether the input share is 'solved' or not (valid, invalid, repetitious)
-    if not share.status == "solved":
-        return
-    # make all database requests and queries atomic
-    with transaction.atomic():
-        # delete all related balances if it's not the first execution of 'PPLNS' function for the input share
-        Balance.objects.filter(share=share).delete()
-        # retrieve last N 'solved' or 'valid' shares before the input share (the input is included too)
-        sliced_shares = Share.objects.filter(
-            id__lte=share.id,
-            status__in=["solved", "valid"]).order_by('-id')
-        if sliced_shares.count() > N:
-            sliced_shares = sliced_shares[:N]
-        shares = Share.objects.filter(id__in=sliced_shares)
-        # a list of (miner's primary key, miner's valid shares) for this block mining round
-        miners_share_count = shares.values_list('miner').annotate(Count('miner'))
-        # total number of objects in 'shares' queryset
-        total_number_of_shares = shares.count()
-        # define "balances" as a list to create and save balance objects
-        balances = list()
-        # for each miner, create a new balance and calculate it's reward and save it
-        for (miner_id, share_count) in miners_share_count:
-            balances.append(Balance(
-                miner_id=miner_id,
-                share=share,
-                balance=min(MAX_REWARD, TOTAL_REWARD * (share_count / total_number_of_shares)))
-            )
-        # create and save balances to database
-        Balance.objects.bulk_create(balances)
-        logger.info('Balance created for all miners related to this round.')
+class Prop(RewardAlgorithm):
+    def get_beginning_share(self, considered_time):
+        """
+        This method calculates the first valid share based on prop algorithm
+        :param considered_time: shares before this time are considered
+        :return: first valid share based on implemented algorithm
+        """
+        penultimate_solved_share = Share.objects.filter(
+            created_at__lt=considered_time,
+            status="solved"
+        ).order_by('-created_at').first()
 
-    return
+        beginning_share = Share.objects.all(). \
+            filter(status__in=['solved', 'valid']).order_by('created_at').first()
+
+        # there are more than one solved
+        if penultimate_solved_share is not None:
+            beginning_share = Share.objects.filter(
+                created_at__lte=considered_time,
+                created_at__gt=penultimate_solved_share.created_at,
+                status__in=['valid', 'solved']
+            ).order_by('created_at').first()
+
+        return beginning_share
+
+
+class PPLNS(RewardAlgorithm):
+    def get_beginning_share(self, considered_time):
+        """
+        This method calculates the first valid share based on the PPLNS algorithm
+        :param considered_time: shares before this time are considered
+        :return: first valid share based on implemented algorithm
+        """
+        N = Configuration.objects.PPLNS_N
+        prev_shares = Share.objects.filter(
+            created_at__lte=considered_time,
+            status__in=["solved", "valid"]
+        ).order_by('-created_at')
+
+        # more than N shares, slicing
+        if prev_shares.count() > N:
+            prev_shares = prev_shares[:N]
+
+        return prev_shares[prev_shares.count() - 1]
 
 
 def compute_hash_rate(by, to=timezone.now(), pk=None):

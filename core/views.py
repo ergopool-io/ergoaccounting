@@ -11,8 +11,7 @@ from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS, MAX_PAGINATION, DEFAU
 from rest_framework.pagination import PageNumberPagination
 
 from .serializers import *
-from core.models import Configuration
-from .utils import prop
+from .utils import *
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ class ShareView(viewsets.GenericViewSet,
             _status = "repetitious"
         if _status == "solved":
             logger.info('Solved share, saving.')
-            prop(Share.objects.get(share=_share, status="solved"))
+            RewardAlgorithm.get_instance().perform_logic(Share.objects.get(share=_share, status="solved"))
 
 
 class BalanceView(viewsets.GenericViewSet,

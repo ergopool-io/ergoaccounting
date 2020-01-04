@@ -10,21 +10,28 @@ CONFIGURATION_KEY_CHOICE = (
     ("TOTAL_REWARD", "TOTAL_REWARD"),
     ("MAX_REWARD", "MAX_REWARD"),
     ("PPLNS_N", "PPLNS_N"),
-    ("PERIOD_TIME", "PERIOD_TIME")
+    ("FEE", "FEE"),
+    ("PERIOD_TIME", "PERIOD_TIME"),
+    ("REWARD_ALGORITHM", "REWARD_ALGORITHM")
+
 )
 
 CONFIGURATION_KEY_TO_TYPE = {
     "TOTAL_REWARD": "float",
     "MAX_REWARD": "float",
     "PPLNS_N": "int",
-    "PERIOD_TIME": "float"
+    "FEE": "float",
+    "PERIOD_TIME": "float",
+    'REWARD_ALGORITHM': 'str'
 }
 
 CONFIGURATION_DEFAULT_KEY_VALUE = {
     'TOTAL_REWARD': 65,
     'MAX_REWARD': 35,
     'PPLNS_N': 5,
-    'PERIOD_TIME': 24 * 60 * 60
+    'FEE': 0.0,
+    'PERIOD_TIME': 24 * 60 * 60,
+    'REWARD_ALGORITHM': 'Prop'
 }
 
 
