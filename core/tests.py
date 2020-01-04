@@ -24,7 +24,7 @@ class ShareTestCase(TestCase):
         self.client = Client()
         Miner.objects.create(public_key="2", nick_name="Parsa")
 
-    @patch('core.utils.prop')
+    @patch('core.utils.RewardAlgorithm.get_instance')
     def test_prop_call(self, mocked_call_prop):
         mocked_call_prop.return_value = None
         data = {'share': '1',
@@ -35,7 +35,7 @@ class ShareTestCase(TestCase):
         self.client.post('/shares/', data, format='json')
         self.assertTrue(mocked_call_prop.isCalled())
 
-    @patch('core.utils.prop')
+    @patch('core.utils.RewardAlgorithm.get_instance')
     def test_prop_not_call(self, mocked_not_call_prop):
         mocked_not_call_prop.return_value = None
         data = {'share': '1',
@@ -125,6 +125,7 @@ class PropFunctionTest(TestCase):
         setUp function to create 5 miners for testing prop function
         :return:
         """
+        Configuration.objects.create(key='REWARD_ALGORITHM', value='Prop')
         # create miners lists
         miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
         # create shares list
@@ -133,7 +134,7 @@ class PropFunctionTest(TestCase):
             miner=miners[i % 3],
             status="solved" if i in [14, 34, 35] else "valid" if i % 2 == 0 else "invalid",
             difficulty=1000
-        )for i in range(36)]
+        ) for i in range(36)]
         # set create date for each shares to make them a sequence valid
         start_date = timezone.now() + timedelta(seconds=-100)
         for share in shares:
@@ -142,6 +143,7 @@ class PropFunctionTest(TestCase):
             start_date += timedelta(seconds=1)
         self.miners = miners
         self.shares = shares
+        self.prop = RewardAlgorithm.get_instance().perform_logic
 
     def test_prop_with_0_solved_share(self):
         """
@@ -153,7 +155,7 @@ class PropFunctionTest(TestCase):
         """
         # call prop function for an invalid (not solved) share, 8th for example
         share = self.shares[12]
-        prop(share)
+        self.prop(share)
         self.assertEqual(Balance.objects.filter(share=share).count(), 0)
 
     def get_share_balance(self, sh):
@@ -167,7 +169,7 @@ class PropFunctionTest(TestCase):
         :return:
         """
         share = self.shares[14]
-        prop(share)
+        self.prop(share)
         balances = self.get_share_balance(share)
         self.assertEqual(balances, {'0': 24.375, '1': 16.25, '2': 24.375})
 
@@ -178,7 +180,7 @@ class PropFunctionTest(TestCase):
         :return:
         """
         share = self.shares[34]
-        prop(share)
+        self.prop(share)
         balances = self.get_share_balance(share)
         self.assertEqual(balances, {'0': 19.5, '1': 26.0, '2': 19.5})
 
@@ -189,7 +191,7 @@ class PropFunctionTest(TestCase):
         :return:
         """
         share = self.shares[35]
-        prop(share)
+        self.prop(share)
         balances = self.get_share_balance(share)
         reward_value = min(Configuration.objects.MAX_REWARD, Configuration.objects.TOTAL_REWARD)
         self.assertEqual(balances, {'2': float(reward_value)})
@@ -201,15 +203,66 @@ class PropFunctionTest(TestCase):
         """
         share = self.shares[34]
         for i in range(5):
-            prop(share)
+            self.prop(share)
             balances = self.get_share_balance(share)
             self.assertEqual(balances, {'0': 19.5, '1': 26.0, '2': 19.5})
+
+    def test_prop_with_first_solved_share_with_fee(self):
+        """
+        in this scenario we call prop function with first solved share in database.
+        we generate 15 share 7 are invalid 7 are valid and one is solved
+
+        :return:
+        """
+        Configuration.objects.create(key='FEE', value='10')
+        share = self.shares[14]
+        self.prop(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': 20.625, '1': 13.75, '2': 20.625})
+
+    def test_prop_between_two_solved_shares_with_fee(self):
+        """
+        this function check when we have two solved share and some valid share between them.
+        in this case we have 9 valid share 9 invalid share and one solved share.
+        :return:
+        """
+        Configuration.objects.create(key='FEE', value='10')
+        share = self.shares[34]
+        self.prop(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': 16.5, '1': 22.0, '2': 16.5})
+
+    def test_prop_with_with_no_valid_share_with_fee(self):
+        """
+        in this case we test when no valid share between solved shares
+        in this case we only have one share and reward must be minimum of MAX_REWARD and TOTAL_REWARD
+        :return:
+        """
+        Configuration.objects.create(key='FEE', value='10')
+        share = self.shares[35]
+        self.prop(share)
+        balances = self.get_share_balance(share)
+        reward_value = min(Configuration.objects.MAX_REWARD, Configuration.objects.TOTAL_REWARD - Configuration.objects.FEE)
+        self.assertEqual(balances, {'2': float(reward_value)})
+
+    def test_prop_called_multiple_with_fee(self):
+        """
+        in this case we call prop function 5 times. after each call balance for each miner must be same as expected
+        :return:
+        """
+        Configuration.objects.create(key='FEE', value='10')
+        share = self.shares[34]
+        for i in range(5):
+            self.prop(share)
+            balances = self.get_share_balance(share)
+            self.assertEqual(balances, {'0': 16.5, '1': 22.0, '2': 16.5})
 
     def tearDown(self):
         """
         tearDown function to delete miners created in setUp function
         :return:
         """
+        Configuration.objects.all().delete()
         # delete all miners objects. all related objects are deleted
         for miner in self.miners:
             miner.delete()
@@ -461,9 +514,10 @@ class ConfigurationAPITest(TestCase):
         :return:
         """
         for key, label in CONFIGURATION_KEY_CHOICE:
-            Configuration.objects.create(key=key, value=100000)
+            Configuration.objects.create(key=key, value='100000')
         for key, label in CONFIGURATION_KEY_CHOICE:
-            self.assertEqual(getattr(Configuration.objects, key), 100000)
+            val_type = CONFIGURATION_KEY_TO_TYPE[key]
+            self.assertEqual(getattr(Configuration.objects, key), locate(val_type)('100000'))
 
     def test_default_config_restore(self):
         """
@@ -496,6 +550,8 @@ class PPLNSFunctionTest(TestCase):
         setUp function to create 3 miners and 36 test
         :return:
         """
+        Configuration.objects.create(key='REWARD_ALGORITHM', value='PPLNS')
+        self.PPLNS = RewardAlgorithm.get_instance().perform_logic
         # create miners lists
         miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
         # create shares list
@@ -512,7 +568,7 @@ class PPLNSFunctionTest(TestCase):
             share.save()
             start_date += timedelta(seconds=1)
         # set pplns prev count to 10
-        Configuration.objects.create(key="PPLNS_N", value=10)
+        Configuration.objects.create(key="PPLNS_N", value='10')
         self.miners = miners
         self.shares = shares
 
@@ -525,7 +581,7 @@ class PPLNSFunctionTest(TestCase):
         :return:
         """
         share = self.shares[13]
-        core.utils.PPLNS(share)
+        self.PPLNS(share)
         self.assertEqual(Balance.objects.filter(share=share).count(), 0)
 
     def test_pplns_with_lower_amount_of_shares(self):
@@ -534,7 +590,7 @@ class PPLNSFunctionTest(TestCase):
         :return:
         """
         share = self.shares[14]
-        core.utils.PPLNS(share)
+        self.PPLNS(share)
         balances = self.get_share_balance(share)
         self.assertEqual(balances, {'0': 24.375, '1': 24.375, '2': 16.25})
 
@@ -545,7 +601,7 @@ class PPLNSFunctionTest(TestCase):
         :return:
         """
         share = self.shares[44]
-        core.utils.PPLNS(share)
+        self.PPLNS(share)
         balances = self.get_share_balance(share)
         self.assertEqual(balances, {'0': 19.5, '1': 26.0, '2': 19.5})
 
@@ -556,9 +612,44 @@ class PPLNSFunctionTest(TestCase):
         """
         share = self.shares[44]
         for i in range(5):
-            core.utils.PPLNS(share)
+            self.PPLNS(share)
             balances = self.get_share_balance(share)
             self.assertEqual(balances, {'0': 19.5, '1': 26.0, '2': 19.5})
+
+    def test_pplns_with_lower_amount_of_shares_with_fee(self):
+        """
+        in this case we have 8 shares and pplns must work with this amount of shares with fee: 10
+        :return:
+        """
+        share = self.shares[14]
+        Configuration.objects.create(key='FEE', value='10')
+        self.PPLNS(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': 20.625, '1': 20.625, '2': 13.75})
+
+    def test_pplns_with_more_than_n_shares_with_fee(self):
+        """
+        this function check when we have two solved share and some valid share between them.
+        in this case we have 9 valid share 9 invalid share and one solved share.
+        :return:
+        """
+        share = self.shares[44]
+        Configuration.objects.create(key='FEE', value='10')
+        self.PPLNS(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': 16.5, '1': 22.0, '2': 16.5})
+
+    def test_pplns_multiple_with_fee(self):
+        """
+        in this case we call pplns function 5 times. after each call balance for each miner must be same as expected
+        :return:
+        """
+        share = self.shares[44]
+        Configuration.objects.create(key='FEE', value='10')
+        for i in range(5):
+            self.PPLNS(share)
+            balances = self.get_share_balance(share)
+            self.assertEqual(balances, {'0': 16.5, '1': 22.0, '2': 16.5})
 
     def tearDown(self):
         """
@@ -571,6 +662,8 @@ class PPLNSFunctionTest(TestCase):
         Share.objects.all().delete()
         # delete all Miner objects
         Miner.objects.all().delete()
+        # delete all configurations
+        Configuration.objects.all().delete()
 
 
 class ComputeHashRateTest(TransactionTestCase):
