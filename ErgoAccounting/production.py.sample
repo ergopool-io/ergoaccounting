@@ -26,6 +26,12 @@ MAX_PAGINATION = 200
 # For pagination requests
 DEFAULT_PAGINATION = 50
 
+# Address Node (ex: "http://127.0.0.1:9053/")
+NODE_ADDRESS = "Address Node"
+
+# Secret Key of Node(apiKey) (ex: "623f4e8e440007f45020afabbf56d8ba43144778757ea88497c794ad529a0433")
+API_KEY = "Secret Key of Node"
+
 # Logging config
 # You may want to uncomment mail handler in production!
 # you should get the logger like this whenever you need it: logging.getLogger(__name__)

@@ -12,7 +12,9 @@ CONFIGURATION_KEY_CHOICE = (
     ("PPLNS_N", "PPLNS_N"),
     ("FEE", "FEE"),
     ("PERIOD_TIME", "PERIOD_TIME"),
-    ("REWARD_ALGORITHM", "REWARD_ALGORITHM")
+    ("REWARD_ALGORITHM", "REWARD_ALGORITHM"),
+    ("TRANSACTION_FEE", "TRANSACTION_FEE"),
+    ("MAX_NUMBER_OF_OUTPUTS", "MAX_NUMBER_OF_OUTPUTS")
 
 )
 
@@ -22,7 +24,9 @@ CONFIGURATION_KEY_TO_TYPE = {
     "PPLNS_N": "int",
     "FEE": "float",
     "PERIOD_TIME": "float",
-    'REWARD_ALGORITHM': 'str'
+    'REWARD_ALGORITHM': 'str',
+    'TRANSACTION_FEE': 'int',
+    "MAX_NUMBER_OF_OUTPUTS": 'int',
 }
 
 CONFIGURATION_DEFAULT_KEY_VALUE = {
@@ -31,7 +35,9 @@ CONFIGURATION_DEFAULT_KEY_VALUE = {
     'PPLNS_N': 5,
     'FEE': 0.0,
     'PERIOD_TIME': 24 * 60 * 60,
-    'REWARD_ALGORITHM': 'Prop'
+    'REWARD_ALGORITHM': 'Prop',
+    'TRANSACTION_FEE': 1000000,
+    "MAX_NUMBER_OF_OUTPUTS": 5
 }
 
 
@@ -70,10 +76,11 @@ class Balance(models.Model):
     STATUS_CHOICE = (
         (1, "immature"),
         (2, "mature"),
-        (3, "withdraw"))
+        (3, "withdraw")
+    )
 
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
-    share = models.ForeignKey(Share, on_delete=models.CASCADE)
+    share = models.ForeignKey(Share, on_delete=models.CASCADE, null=True)
     balance = models.FloatField(default=0)
     status = models.IntegerField(blank=False, choices=STATUS_CHOICE, default=1)
     created_at = models.DateTimeField(auto_now_add=True)
