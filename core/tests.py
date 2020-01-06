@@ -3,7 +3,7 @@ import string
 import uuid
 from django.test import TestCase, Client, TransactionTestCase
 from django.utils import timezone
-from mock import patch
+from mock import patch, call
 from core.models import Miner, Share
 import core.utils
 from .views import *
@@ -722,6 +722,36 @@ class BlockTestCase(TestCase):
     Api using limit and offset, period time, sortBy and sortDirection and check that this block mined by miner of pool
      if mined there was flag "inpool": True
     """
+
+    def mocked_get_request(*args, **kwargs):
+        """
+        mock requests with method get for urls 'blocks'
+        """
+
+        class MockResponse:
+            def __init__(self, json_data):
+                self.json_data = json_data
+
+            def json(self):
+                return self.json_data
+
+        if args[0] == ERGO_EXPLORER_ADDRESS + "/blocks/?offset=1&limit=4":
+            with open("core/data_mock_testing/test_get_offset_limit.json", "r") as read_file:
+                response = json.load(read_file)
+            return MockResponse(response)
+
+        if "/blocks/?sortBy=height&sortDirection=asc" in args[0]:
+            with open("core/data_mock_testing/test_get_sortBy_sortDirection.json", "r") as read_file:
+                response = json.load(read_file)
+            return MockResponse(response)
+
+        if "/blocks/?endDate=1579811399999&startDate=1577824200000" in args[0]:
+            with open("core/data_mock_testing/test_get_period_time.json", "r") as read_file:
+                response = json.load(read_file)
+            return MockResponse(response)
+
+        return MockResponse(None)
+
     def setUp(self):
         """
         Create a miner and after that create 3 objects => solved = 2 and valid = 1
@@ -746,31 +776,6 @@ class BlockTestCase(TestCase):
             share.updated_at = datetime(2020, 1, 1, 8 + i, 59, 20, 395985, tzinfo=timezone.utc)
             share.save()
             i = i + 1
-
-    def mocked_get_request(*args, **kwargs):
-        """
-        mock requests with method get for urls 'blocks'
-        """
-        class MockResponse:
-            def __init__(self, json_data):
-                self.json_data = json_data
-
-            def json(self):
-                return self.json_data
-        if args[0] == ERGO_EXPLORER_ADDRESS + "/blocks/?offset=1&limit=4":
-            with open("core/data_mock_testing/test_get_offset_limit.json", "r") as read_file:
-                response = json.load(read_file)
-            return MockResponse(response)
-        if "/blocks/?sortBy=height&sortDirection=asc" in args[0]:
-            with open("core/data_mock_testing/test_get_sortBy_sortDirection.json", "r") as read_file:
-                response = json.load(read_file)
-            return MockResponse(response)
-        if "/blocks/?endDate=1579811399999&startDate=1577824200000" in args[0]:
-            with open("core/data_mock_testing/test_get_period_time.json", "r") as read_file:
-                response = json.load(read_file)
-            return MockResponse(response)
-
-        return MockResponse(None)
 
     @patch("requests.get", side_effect=mocked_get_request)
     def test_get_offset_limit(self, mock):
@@ -852,3 +857,191 @@ class BlockTestCase(TestCase):
         self.assertEqual(blocks_pool_result, blocks_pool)
 
 
+def mocked_node_request_transaction_generate_test(*args, **kwargs):
+    """
+    mock requests with method post
+    """
+    url = args[0]
+
+    if url == 'wallet/boxes/unspent':
+        with open("core/data_mock_testing/test_boxes.json", "r") as read_file:
+            return {
+                'response': json.load(read_file),
+                'status': 'success'
+            }
+
+    if 'utxo/byIdBinary/' in url:
+        last_part = url.split('/')[-1]
+        return {
+            'response': {
+                'boxId': last_part,
+                'bytes': last_part
+            },
+            'status': 'success'
+        }
+
+    if url == 'wallet/transaction/send':
+        data = str(kwargs['data'])
+        if 'invalid_input' in data:
+            return {
+                'status': 'error'
+            }
+
+        return {
+            'status': 'success'
+        }
+
+    return {
+        'response': None,
+        'status': 'error'
+    }
+
+
+@patch('core.utils.node_request', side_effect=mocked_node_request_transaction_generate_test)
+class TransactionGenerateTestCase(TestCase):
+    """
+    Test class for transaction generate and send method
+    """
+
+    def setUp(self):
+        """
+        creates necessary configuration and objects and a default output list
+        :return:
+        """
+        # setting configuration
+        Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='4')
+
+        # creating 10 miners
+        pks = [random_string() for i in range(10)]
+        for pk in pks:
+            Miner.objects.create(public_key=pk)
+
+        # create output for each miner
+        self.outputs = [(pk, int((i + 1) * 1e10)) for i, pk in enumerate(pks)]
+
+    def test_generate_three_transactions_max_num_output_4(self, mocked_request):
+        """
+        calling the function with all outputs and MAX_NUMBER_OF_OUTPUT = 4
+        must create 3 transactions and required balances
+        """
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        generate_and_send_transaction(self.outputs)
+        chunks = [self.outputs[i:i + 4] for i in range(0, len(self.outputs), 4)]
+        reqs = [{
+            'requests': [
+                {
+                    'address': pk,
+                    'value': value
+                } for pk, value in chunk
+            ],
+            'fee': TRANSACTION_FEE,
+            'inputsRaw': []
+        } for chunk in chunks]
+
+        reqs[0]['inputsRaw'] = ['a', 'b', 'c', 'd']
+        reqs[1]['inputsRaw'] = ['e', 'f', 'g']
+        reqs[2]['inputsRaw'] = ['h', 'i']
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs[0], request_type='post')
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs[1], request_type='post')
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs[2], request_type='post')
+
+        for pk, value in self.outputs:
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
+
+    def test_generate_one_transactions_max_num_output_4(self, mocked_request):
+        """
+        calling the function with 4 outputs and MAX_NUMBER_OF_OUTPUT = 4
+        must create 1 transactions and required balances
+        """
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        generate_and_send_transaction(self.outputs[0:4])
+        outputs = self.outputs[0:4]
+        chunks = [outputs[i:i + 4] for i in range(0, len(outputs), 4)]
+        reqs = [{
+            'requests': [
+                {
+                    'address': pk,
+                    'value': value
+                } for pk, value in chunk
+            ],
+            'fee': TRANSACTION_FEE,
+            'inputsRaw': []
+        } for chunk in chunks]
+
+        reqs[0]['inputsRaw'] = ['a', 'b', 'c', 'd']
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs[0], request_type='post')
+
+        for pk, value in outputs:
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
+
+    def test_generate_three_transactions_max_num_output_20(self, mocked_request):
+        """
+        calling the function with all outputs and MAX_NUMBER_OF_OUTPUT = 20
+        must create 1 transactions and required balances
+        """
+        Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='20')
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        generate_and_send_transaction(self.outputs)
+        reqs = {
+            'requests': [
+                {
+                    'address': pk,
+                    'value': value
+                } for pk, value in self.outputs
+            ],
+            'fee': TRANSACTION_FEE,
+            'inputsRaw': [x for x in 'abcdefghi']
+        }
+
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
+
+        for pk, value in self.outputs:
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
+
+    def test_one_output_with_fee(self, mocked_request):
+        """
+        calling the function with one output and MAX_NUMBER_OF_OUTPUT = 10 and subtract_fee = true
+        must create 1 transactions with subtracted value and required balances
+        """
+        Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='10')
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        generate_and_send_transaction(self.outputs[9:], subtract_fee=True)
+        reqs = {
+            'requests': [
+                {
+                    'address': pk,
+                    'value': value - TRANSACTION_FEE
+                } for pk, value in self.outputs[9:]
+            ],
+            'fee': TRANSACTION_FEE,
+            'inputsRaw': [x for x in 'abcd']
+        }
+
+        # mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
+        mocked_request.assert_has_calls([call('wallet/transaction/send', data=reqs, request_type='post')])
+
+        for pk, value in self.outputs[9:]:
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
+
+    def test_node_generate_and_send_request_error(self, mocked_request):
+        """
+        when node is not available for any reason or returns error then nothing must happen
+        no balance must be created!
+        """
+        Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='10')
+        outputs = self.outputs[:]
+        Miner.objects.create(public_key='invalid_input')
+        outputs[0] = ('invalid_input', int(1e10))
+        generate_and_send_transaction(outputs)
+
+        for pk, value in outputs:
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 0)
+
+    def tearDown(self):
+        """
+        tearDown function to clean up objects created in setUp function
+        :return:
+        """
+        Configuration.objects.all().delete()
+        Miner.objects.all().delete()
+        # delete all miners objects. all related objects are deleted
