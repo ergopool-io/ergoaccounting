@@ -2,15 +2,12 @@ import random
 import string
 import uuid
 from django.test import TestCase, Client, TransactionTestCase
-from django.utils import timezone
 from mock import patch, call
-from core.models import Miner, Share
-import core.utils
 from .views import *
 from datetime import datetime, timedelta
 from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS
 import json
-import os
+from core.tasks import periodic_withdrawal
 
 
 def random_string(length=10):
@@ -1017,8 +1014,7 @@ class TransactionGenerateTestCase(TestCase):
             'inputsRaw': [x for x in 'abcd']
         }
 
-        # mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
-        mocked_request.assert_has_calls([call('wallet/transaction/send', data=reqs, request_type='post')])
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
 
         for pk, value in self.outputs[9:]:
             self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
@@ -1036,6 +1032,248 @@ class TransactionGenerateTestCase(TestCase):
 
         for pk, value in outputs:
             self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 0)
+
+    def tearDown(self):
+        """
+        tearDown function to clean up objects created in setUp function
+        :return:
+        """
+        Configuration.objects.all().delete()
+        Miner.objects.all().delete()
+        # delete all miners objects. all related objects are deleted
+
+
+@patch('core.tasks.generate_and_send_transaction')
+class PeriodicWithdrawalTestCase(TestCase):
+    """
+    Test class for periodic withdrawal and send method
+    """
+
+    def setUp(self):
+        """
+        creates necessary configuration and objects and a default output list
+        :return:
+        """
+        # setting configuration
+        Configuration.objects.create(key='DEFAULT_WITHDRAW_THRESHOLD', value='100')
+
+        # creating 10 miners
+        pks = [random_string() for i in range(10)]
+        for pk in pks:
+            Miner.objects.create(public_key=pk)
+
+        self.miners = Miner.objects.all()
+
+        # by default all miners have balance of 80 erg
+        for miner in Miner.objects.all():
+            Balance.objects.create(miner=miner, balance=100, status=2)
+            Balance.objects.create(miner=miner, balance=-20, status=3)
+
+        self.outputs = [(pk, int(80e9)) for pk in pks]
+
+    def test_all_miners_below_defualt_threshold(self, mocked_generate_txs):
+        """
+        all miners balances are below default threshold
+        """
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call([])])
+
+    def test_all_miners_except_one_below_default_threshold(self, mocked_generate_txs):
+        """
+        all miners balances are below default threshold but one
+        """
+        Balance.objects.create(miner=self.miners[0], balance=100, status=2)
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call([(self.miners[0].public_key, int(180e9))])])
+
+    def test_all_miner_below_default_threshold_one_explicit_threshold(self, mocked_generate_txs):
+        """
+        all miners balances are below default threshold
+        one miner has explicit threshold, his balance is above this threshold
+        """
+        miner = self.miners[0]
+        miner.periodic_withdrawal_amount = 20
+        miner.save()
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call([(miner.public_key, int(80e9))])])
+
+    def test_all_miner_below_default_threshold_two_explicit_threshold(self, mocked_generate_txs):
+        """
+        all miners balances are below default threshold
+        two miners have explicit threshold, conf of one of them is exactly his balance
+        """
+        miner1 = self.miners[0]
+        miner1.periodic_withdrawal_amount = 20
+        miner1.save()
+        miner2 = self.miners[1]
+        miner2.periodic_withdrawal_amount = 80
+        miner2.save()
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call([(miner1.public_key, int(80e9)),
+                                                    (miner2.public_key, int(80e9))])])
+
+    def test_all_miners_but_one_below_default_threshold_two_explicit_threshold_one_not_above(self, mocked_generate_txs):
+        """
+        all miners balances are below default threshold but one
+        two miners have explicit threshold, balance of one of them is below the explicit conf
+        """
+        miner1 = self.miners[0]
+        miner1.periodic_withdrawal_amount = 20
+        miner1.save()
+        miner2 = self.miners[1]
+        miner2.periodic_withdrawal_amount = 80
+        miner2.save()
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call([(miner1.public_key, int(80e9)),
+                                                    (miner2.public_key, int(80e9))])])
+
+    def test_all_miners_but_one_below_default_one_above_default_below_explicit(self, mocked_generate_txs):
+        """
+        all miners balances are below default threshold but one
+        two miners have explicit threshold, balance of one of them is below the explicit conf
+        """
+        miner1 = self.miners[0]
+        Balance.objects.create(miner=miner1, balance=30, status=2)
+        miner1.periodic_withdrawal_amount = 120
+        miner1.save()
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call([])])
+
+    def test_all_miners_above_default_but_one(self, mocked_generate_txs):
+        """
+        all miners balances are above default threshold but one
+        """
+        for miner in self.miners:
+            Balance.objects.create(miner=miner, balance=30, status=2)
+        miner1 = self.miners[0]
+        Balance.objects.create(miner=miner1, balance=-80, status=2)
+        outputs = [(miner.public_key, int(110e9)) for miner in self.miners[1:]]
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call(outputs)])
+
+    def test_all_miners_above_default_but_one_no_balance(self, mocked_generate_txs):
+        """
+        all miners balances are above default threshold but one
+        one doesn't have any balance
+        """
+        for miner in self.miners:
+            Balance.objects.create(miner=miner, balance=30, status=2)
+        miner1 = self.miners[0]
+        Balance.objects.filter(miner=miner1).delete()
+        outputs = [(miner.public_key, int(110e9)) for miner in self.miners[1:]]
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call(outputs)])
+
+    def test_no_balance(self, mocked_generate_txs):
+        """
+        no balance, empty output
+        """
+        Balance.objects.all().delete()
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call([])])
+
+    def tearDown(self):
+        """
+        tearDown function to clean up objects created in setUp function
+        :return:
+        """
+        Configuration.objects.all().delete()
+        Miner.objects.all().delete()
+        # delete all miners objects. all related objects are deleted
+
+class MinerViewTestCase(TestCase):
+    """
+    Test class for MinerView
+    """
+
+    def setUp(self):
+        """
+        creates necessary configuration and objects and a default output list
+        :return:
+        """
+        self.client = Client()
+
+        # setting configuration
+        Configuration.objects.create(key='MAX_WITHDRAW_THRESHOLD', value='100')
+        Configuration.objects.create(key='MIN_WITHDRAW_THRESHOLD', value='1')
+
+        # creating 10 miners
+        pks = [random_string() for i in range(10)]
+        for pk in pks:
+            Miner.objects.create(public_key=pk)
+
+        self.miners = Miner.objects.all()
+
+    def get_url(self, pk):
+        return urljoin('/miner/', pk) + '/'
+
+    def test_miner_not_specified_threshold_valid(self):
+        """
+        miner is not specified in request
+        """
+        data = {
+            'periodic_withdrawal_amount': 20
+        }
+
+        res = self.client.patch('/miner/', data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_miner_not_valid_threshold_valid(self):
+        """
+        miner specified but not valid
+        """
+        miner = self.miners[0]
+        data = {
+            'periodic_withdrawal_amount': 20
+        }
+
+        bef = miner.periodic_withdrawal_amount
+        res = self.client.patch('/miner/not_valid/', data, content_type='application/json')
+
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
+
+    def test_miner_valid_threshold_not_valid(self):
+        """
+        miner is specified and valid, threshold specified but not valid
+        """
+        miner = self.miners[0]
+        data = {
+            'periodic_withdrawal_amount': 1000
+        }
+
+        bef = miner.periodic_withdrawal_amount
+        res = self.client.patch(self.get_url(miner.public_key), data, content_type='application/json')
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
+
+    def test_miner_valid_threshold_valid(self):
+        """
+        miner is specified and valid, threshold specified and valid
+        """
+        miner = self.miners[0]
+        data = {
+            'periodic_withdrawal_amount': 20
+        }
+
+        res = self.client.patch(self.get_url(miner.public_key), data, content_type='application/json')
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(20, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
+
+    def test_miner_valid_threshold_type_not_valid(self):
+        miner = self.miners[0]
+        data = {
+            'public_key': miner.public_key,
+            'periodic_withdrawal_amount': 'not_valid'
+        }
+
+        bef = miner.periodic_withdrawal_amount
+        res = self.client.patch(self.get_url(miner.public_key), data, content_type='application/json')
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
 
     def tearDown(self):
         """

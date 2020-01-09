@@ -1,4 +1,5 @@
 import os
+from ErgoAccounting.celery import app
 
 # Database
 # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
@@ -71,5 +72,19 @@ LOGGING = {
             'level': LOG_LEVEL,
         }
     }
+}
+
+# set your approprate broker url, e.g, rabbitmq or redis
+broker_url = 'amqp://guest:guest@localhost:5672//'
+
+# for interval of the periodic task PERIODIC_WITHDRAWAL_INTERVAL should be set
+# default interval is 24h, it is also possible to change the crontime to a
+# specific time in day, e.g, 00:00am
+app.conf.beat_schedule = {
+    'periodic_withdrawal': {
+        'task': 'core.tasks.periodic_withdrawal',
+        'schedule': os.environ.get('PERIODIC_WITHDRAWAL_INTERVAL', 24 * 3600),
+        'args': ()
+    },
 }
 
