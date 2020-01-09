@@ -48,3 +48,23 @@ class ConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Configuration
         fields = ['key', 'value']
+
+
+class MinerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Miner
+        fields = ['public_key', 'periodic_withdrawal_amount', 'nick_name']
+        read_only_fields = ['public_key']
+
+    def validate_periodic_withdrawal_amount(self, value):
+        MIN_THRESHOLD = Configuration.objects.MIN_WITHDRAW_THRESHOLD
+        MAX_THRESHOLD = Configuration.objects.MAX_WITHDRAW_THRESHOLD
+
+        # threshold must be between specified config
+        if not (MIN_THRESHOLD <= value <= MAX_THRESHOLD):
+            raise serializers.ValidationError('threshold is not valid, must be between {} and {}'
+                                              .format(MIN_THRESHOLD, MAX_THRESHOLD))
+
+        return value
+
+

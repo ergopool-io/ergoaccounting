@@ -14,8 +14,10 @@ CONFIGURATION_KEY_CHOICE = (
     ("PERIOD_TIME", "PERIOD_TIME"),
     ("REWARD_ALGORITHM", "REWARD_ALGORITHM"),
     ("TRANSACTION_FEE", "TRANSACTION_FEE"),
-    ("MAX_NUMBER_OF_OUTPUTS", "MAX_NUMBER_OF_OUTPUTS")
-
+    ("MAX_NUMBER_OF_OUTPUTS", "MAX_NUMBER_OF_OUTPUTS"),
+    ("MIN_WITHDRAW_THRESHOLD", "MIN_WITHDRAW_THRESHOLD"),
+    ("MAX_WITHDRAW_THRESHOLD", "MAX_WITHDRAW_THRESHOLD"),
+    ("DEFAULT_WITHDRAW_THRESHOLD", "DEFAULT_WITHDRAW_THRESHOLD")
 )
 
 CONFIGURATION_KEY_TO_TYPE = {
@@ -25,8 +27,11 @@ CONFIGURATION_KEY_TO_TYPE = {
     "FEE": "float",
     "PERIOD_TIME": "float",
     'REWARD_ALGORITHM': 'str',
-    'TRANSACTION_FEE': 'int',
+    'TRANSACTION_FEE': 'float',
     "MAX_NUMBER_OF_OUTPUTS": 'int',
+    "MAX_WITHDRAW_THRESHOLD": 'float',
+    "MIN_WITHDRAW_THRESHOLD": 'float',
+    "DEFAULT_WITHDRAW_THRESHOLD": 'float'
 }
 
 CONFIGURATION_DEFAULT_KEY_VALUE = {
@@ -37,13 +42,17 @@ CONFIGURATION_DEFAULT_KEY_VALUE = {
     'PERIOD_TIME': 24 * 60 * 60,
     'REWARD_ALGORITHM': 'Prop',
     'TRANSACTION_FEE': 1000000,
-    "MAX_NUMBER_OF_OUTPUTS": 5
+    "MAX_NUMBER_OF_OUTPUTS": 5,
+    "MAX_WITHDRAW_THRESHOLD": 100,
+    "MIN_WITHDRAW_THRESHOLD": 1,
+    "DEFAULT_WITHDRAW_THRESHOLD": 100
 }
 
 
 class Miner(models.Model):
     nick_name = models.CharField(max_length=255, blank=True)
     public_key = models.CharField(max_length=256, unique=True)
+    periodic_withdrawal_amount = models.FloatField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
