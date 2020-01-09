@@ -1,10 +1,9 @@
 from django.db.models import Count, Q, Sum
 from django.db import transaction
 
+from ErgoAccounting.production import API_KEY, NODE_ADDRESS
 from .models import Share, Balance, Miner, Configuration
-from ErgoAccounting.settings import *
 from django.utils import timezone
-from ErgoAccounting.settings import *
 from urllib.parse import urljoin
 import json
 import sys
@@ -220,6 +219,7 @@ def node_request(api, data=None, request_type="get"):
 
     try:
         if request_type == "get":
+            logger.critical(urljoin(NODE_ADDRESS, api))
             response = requests.get(urljoin(NODE_ADDRESS, api), headers=header)
             json_response = response.json()
 
@@ -257,11 +257,15 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
     miners with specified pks in output must be present.
     Checking whether requested withdrawal is valid or not must be done before calling this function!
     Raises Exception if node returns error.
-    :param outputs: list of tuples (pk, value)
+    :param outputs: list of tuples (pk, value), value must be erg * 1e9. so for 10 ergs, value is 10e9
     :param subtract_fee: whether to subtract fee from each output or not
     :return: nothing
     :effect: creates balance for miners specified by each pk
     """
+    # if output is empty
+    if not outputs:
+        return
+
     MAX_NUMBER_OF_OUTPUTS = Configuration.objects.MAX_NUMBER_OF_OUTPUTS
     TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
 
@@ -323,7 +327,4 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
             Balance.objects.filter(id__in=[balance.id for balance in balances]).delete()
             logger.critical('can not create and send the transaction {}'.format(data))
             return
-
-        # generation and sending transaction for this chunk was successful, create balance for miners
-
 

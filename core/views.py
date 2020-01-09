@@ -1,15 +1,12 @@
-from django.db.models import Q, Count, Sum
 from datetime import datetime, timedelta
+
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
-from rest_framework.response import Response
-from core.utils import compute_hash_rate
-from django.utils import timezone
-import requests
-import logging
-from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS, MAX_PAGINATION, DEFAULT_PAGINATION
+from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
 
+from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS, MAX_PAGINATION, DEFAULT_PAGINATION
 from .serializers import *
 from .utils import *
 
@@ -229,7 +226,7 @@ class BlockView(viewsets.GenericViewSet):
             return Response({
                 "message": 'No more record.',
                 "data": {}
-                }, status=status.HTTP_404_NOT_FOUND)
+            }, status=status.HTTP_404_NOT_FOUND)
         if page is not None:
             response = {
                 'items': page,
@@ -239,3 +236,12 @@ class BlockView(viewsets.GenericViewSet):
         logger.debug("Items is None")
         return Response(
             {"message": 'There isn\'t record', "data": {}}, status=status.HTTP_200_OK)
+
+
+class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
+    model = Miner
+    serializer_class = MinerSerializer
+    queryset = Miner.objects.all()
+    lookup_field = 'public_key'
+
+

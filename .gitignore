@@ -13,3 +13,4 @@ include/
 pip-selfcheck.json
 .venv/*
 .important.log
+celerybeat-schedule
