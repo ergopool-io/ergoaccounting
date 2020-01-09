@@ -318,7 +318,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
 
         # create balances with status pending_withdrawal
         balances = [Balance(miner=pk_to_miner[pk],
-                            balance=-value, status=3) for pk, value in chunk]
+                            balance=-value/1e9, status=3) for pk, value in chunk]
         Balance.objects.bulk_create(balances)
 
         res = node_request('wallet/transaction/send', data=data, request_type='post')
