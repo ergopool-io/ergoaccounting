@@ -943,7 +943,7 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs[2], request_type='post')
 
         for pk, value in self.outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 1)
 
     def test_generate_one_transactions_max_num_output_4(self, mocked_request):
         """
@@ -969,7 +969,7 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs[0], request_type='post')
 
         for pk, value in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 1)
 
     def test_generate_three_transactions_max_num_output_20(self, mocked_request):
         """
@@ -993,7 +993,7 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
 
         for pk, value in self.outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 1)
 
     def test_one_output_with_fee(self, mocked_request):
         """
@@ -1017,7 +1017,7 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
 
         for pk, value in self.outputs[9:]:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 1)
 
     def test_node_generate_and_send_request_error(self, mocked_request):
         """
@@ -1031,7 +1031,7 @@ class TransactionGenerateTestCase(TestCase):
         generate_and_send_transaction(outputs)
 
         for pk, value in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value).count(), 0)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 0)
 
     def tearDown(self):
         """
