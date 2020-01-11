@@ -1,16 +1,25 @@
+from django.db.models import Q, Count, Sum, Max, Min
 from datetime import datetime, timedelta
-
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS, MAX_PAGINATION, DEFAULT_PAGINATION
-from .serializers import *
-from .utils import *
+from django.utils import timezone
+from urllib.parse import urljoin, urlencode, urlparse, parse_qsl, urlunparse
+import requests
+import logging
+from django.conf import settings
+from core.utils import compute_hash_rate, RewardAlgorithm
+from core.models import Share, Miner, Balance, Configuration
+from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 
 logger = logging.getLogger(__name__)
+
+ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
+MAX_PAGINATION = getattr(settings, "MAX_PAGINATION")
+DEFAULT_PAGINATION = getattr(settings, "DEFAULT_PAGINATION")
 
 
 class ShareView(viewsets.GenericViewSet,
@@ -121,8 +130,8 @@ class DashboardView(viewsets.GenericViewSet,
         """
         # Timestamp of last solved share
         times = Share.objects.all().aggregate(
-            last_solved=models.Max('created_at', filter=Q(status='solved')),
-            first_share=models.Min('created_at')
+            last_solved=Max('created_at', filter=Q(status='solved')),
+            first_share=Min('created_at')
         )
         last_solved_timestamp = times.get("last_solved") or times.get("first_share") or datetime.now()
         # Set the response to be all miners or just one with specified pk
@@ -176,23 +185,30 @@ class BlockView(viewsets.GenericViewSet):
         In this function set limit in number get block from explorer
         :return:mined block
         """
-        url = ''
+        query = dict()
+        base = urljoin(ERGO_EXPLORER_ADDRESS, 'blocks')
         # Create url for send to explorer and set limit for get blocks.
         for param in self.request.query_params:
             # Remove param page from request to Explorer
             if param == 'page':
                 continue
-            query = self.request.query_params.get(param)
+            value = self.request.query_params.get(param)
             # limitation use for limited query on data_base with get limit block
-            if param == 'limit' and int(query) > MAX_PAGINATION:
-                query = MAX_PAGINATION
-            url = url + param + '=' + query if url == '' else url + '&' + param + '=' + query
+            if param == 'limit' and int(value) > MAX_PAGINATION:
+                value = MAX_PAGINATION
+            query[param] = value
         # if in request not use limit set limitation policy pool
-        if 'limit' not in self.request.query_params:
-            url = url + '&limit=' + str(MAX_PAGINATION)
+        if 'limit' not in query:
+            query['limit'] = str(MAX_PAGINATION)
+        url_parts = list(urlparse(base))
+        base_query = dict(parse_qsl(url_parts[4]))
+        base_query.update(query)
+        url_parts[4] = urlencode(base_query)
+        url = urlunparse(url_parts)
+
         try:
             # Send request to Ergo_explorer for get blocks
-            response = requests.get(ERGO_EXPLORER_ADDRESS + "/blocks/?" + url).json()
+            response = requests.get(url).json()
             logger.info("Get response from url {}".format(url))
         except requests.exceptions.RequestException as e:
             logger.error("Can not resolve response from explorer")

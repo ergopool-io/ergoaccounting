@@ -2,12 +2,19 @@ import random
 import string
 import uuid
 from django.test import TestCase, Client, TransactionTestCase
+from django.db.models import Sum
+from rest_framework import status
 from mock import patch, call
-from .views import *
+from urllib.parse import urljoin
 from datetime import datetime, timedelta
-from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS
+from django.utils import timezone
 import json
+from pydoc import locate
+
+from core.utils import RewardAlgorithm, compute_hash_rate, generate_and_send_transaction
+from core.models import Miner, Share, Configuration, CONFIGURATION_KEY_CHOICE, CONFIGURATION_KEY_TO_TYPE, Balance, CONFIGURATION_DEFAULT_KEY_VALUE
 from core.tasks import periodic_withdrawal
+from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS
 
 
 def random_string(length=10):
@@ -156,7 +163,7 @@ class PropFunctionTest(TestCase):
         self.assertEqual(Balance.objects.filter(share=share).count(), 0)
 
     def get_share_balance(self, sh):
-        return dict(Balance.objects.filter(share=sh).values_list('miner__public_key').annotate(models.Sum('balance')))
+        return dict(Balance.objects.filter(share=sh).values_list('miner__public_key').annotate(Sum('balance')))
 
     def test_prop_with_first_solved_share(self):
         """
@@ -570,7 +577,7 @@ class PPLNSFunctionTest(TestCase):
         self.shares = shares
 
     def get_share_balance(self, sh):
-        return dict(Balance.objects.filter(share=sh).values_list('miner__public_key').annotate(models.Sum('balance')))
+        return dict(Balance.objects.filter(share=sh).values_list('miner__public_key').annotate(Sum('balance')))
 
     def test_pplns_with_invalid_share(self):
         """
@@ -732,17 +739,17 @@ class BlockTestCase(TestCase):
             def json(self):
                 return self.json_data
 
-        if args[0] == ERGO_EXPLORER_ADDRESS + "/blocks/?offset=1&limit=4":
+        if args[0] == urljoin(ERGO_EXPLORER_ADDRESS, 'blocks?offset=1&limit=4'):
             with open("core/data_mock_testing/test_get_offset_limit.json", "r") as read_file:
                 response = json.load(read_file)
             return MockResponse(response)
 
-        if "/blocks/?sortBy=height&sortDirection=asc" in args[0]:
+        if "/blocks?sortBy=height&sortDirection=asc" in args[0]:
             with open("core/data_mock_testing/test_get_sortBy_sortDirection.json", "r") as read_file:
                 response = json.load(read_file)
             return MockResponse(response)
 
-        if "/blocks/?endDate=1579811399999&startDate=1577824200000" in args[0]:
+        if "/blocks?endDate=1579811399999&startDate=1577824200000" in args[0]:
             with open("core/data_mock_testing/test_get_period_time.json", "r") as read_file:
                 response = json.load(read_file)
             return MockResponse(response)
