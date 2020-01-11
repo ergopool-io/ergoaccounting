@@ -13,7 +13,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='share',
             name='difficulty',
-            field=models.BigIntegerField(blank=False),
-            preserve_default=False,
+            field=models.BigIntegerField(blank=False, default=1),
         ),
     ]
