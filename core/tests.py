@@ -2,9 +2,8 @@ import random
 import string
 import uuid
 from django.test import TestCase, Client, TransactionTestCase
-from django.db.models import Sum
-from rest_framework import status
 from mock import patch, call
+from .views import *
 from urllib.parse import urljoin
 from datetime import datetime, timedelta
 from django.utils import timezone
@@ -13,8 +12,8 @@ from pydoc import locate
 
 from core.utils import RewardAlgorithm, compute_hash_rate, generate_and_send_transaction
 from core.models import Miner, Share, Configuration, CONFIGURATION_KEY_CHOICE, CONFIGURATION_KEY_TO_TYPE, Balance, CONFIGURATION_DEFAULT_KEY_VALUE
-from core.tasks import periodic_withdrawal
 from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS
+from core.tasks import periodic_withdrawal, generate_and_send_transaction
 
 
 def random_string(length=10):
@@ -901,7 +900,7 @@ def mocked_node_request_transaction_generate_test(*args, **kwargs):
     }
 
 
-@patch('core.utils.node_request', side_effect=mocked_node_request_transaction_generate_test)
+@patch('core.tasks.node_request', side_effect=mocked_node_request_transaction_generate_test)
 class TransactionGenerateTestCase(TestCase):
     """
     Test class for transaction generate and send method
@@ -1210,9 +1209,17 @@ class MinerViewTestCase(TestCase):
             Miner.objects.create(public_key=pk)
 
         self.miners = Miner.objects.all()
+        # by default every miner has 80 erg balance
+        for miner in Miner.objects.all():
+            Balance.objects.create(miner=miner, balance=100, status=2)
+            Balance.objects.create(miner=miner, balance=-20, status=3)
 
-    def get_url(self, pk):
+
+    def get_threshold_url(self, pk):
         return urljoin('/miner/', pk) + '/'
+
+    def get_withdraw_url(self, pk):
+        return urljoin(urljoin('/miner/', pk) + '/', 'withdraw') + '/'
 
     def test_miner_not_specified_threshold_valid(self):
         """
@@ -1250,7 +1257,7 @@ class MinerViewTestCase(TestCase):
         }
 
         bef = miner.periodic_withdrawal_amount
-        res = self.client.patch(self.get_url(miner.public_key), data, content_type='application/json')
+        res = self.client.patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
 
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
@@ -1264,23 +1271,83 @@ class MinerViewTestCase(TestCase):
             'periodic_withdrawal_amount': 20
         }
 
-        res = self.client.patch(self.get_url(miner.public_key), data, content_type='application/json')
+        res = self.client.patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(20, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
 
     def test_miner_valid_threshold_type_not_valid(self):
+        """
+        miner is specified and valid, threshold type is not valid
+        """
         miner = self.miners[0]
         data = {
-            'public_key': miner.public_key,
             'periodic_withdrawal_amount': 'not_valid'
         }
 
         bef = miner.periodic_withdrawal_amount
-        res = self.client.patch(self.get_url(miner.public_key), data, content_type='application/json')
+        res = self.client.patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
 
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_invalid_amount(self, mocked_generate_and_send_txs):
+        """
+        withdraw type is not valid
+        """
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': 'not_valid'
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_not_enough_balance(self, mocked_generate_and_send_txs):
+        """
+        not enough balance for the request
+        """
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': 100
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+        balances = Balance.objects.filter(miner=miner, status__in=[2, 3])
+        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_enough_balance_successful(self, mocked_generate_and_send_txs):
+        """
+        enough balance, successful
+        """
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': 60
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        mocked_generate_and_send_txs.delay.assert_has_calls([call([(miner.public_key, int(60e9))], subtract_fee=True)])
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_all_balance_successful(self, mocked_generate_and_send_txs):
+        """
+        enough balance, withdraw all the balance, successful
+        """
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': 80
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        mocked_generate_and_send_txs.delay.assert_has_calls([call([(miner.public_key, int(80e9))], subtract_fee=True)])
 
     def tearDown(self):
         """
@@ -1290,3 +1357,4 @@ class MinerViewTestCase(TestCase):
         Configuration.objects.all().delete()
         Miner.objects.all().delete()
         # delete all miners objects. all related objects are deleted
+

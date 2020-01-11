@@ -14,6 +14,8 @@ from django.conf import settings
 from core.utils import compute_hash_rate, RewardAlgorithm
 from core.models import Share, Miner, Balance, Configuration
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
+from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS, MAX_PAGINATION, DEFAULT_PAGINATION
+from core.tasks import generate_and_send_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -260,4 +262,29 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
     queryset = Miner.objects.all()
     lookup_field = 'public_key'
 
+    @action(detail=True, methods=['post'], name='withdrawal')
+    def withdraw(self, request, public_key=None):
+        """
+        this action specifies withdraw action of the miner.
+        runs a celery task in case that the request is valid
+        """
+        miner = self.get_object()
+        balances = Balance.objects.filter(miner=miner, status__in=[2, 3])
+        total = sum(b.balance for b in balances)
 
+        requested_amount = request.data.get('withdraw_amount')
+        try:
+            requested_amount = float(requested_amount)
+            if requested_amount <= 0:
+                raise Exception()
+
+        except:
+            return Response({'message': 'withdraw_amount field is not valid.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if requested_amount > total:
+            return Response({'message': 'withdraw_amount is bigger than total balance.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        generate_and_send_transaction.delay([(miner.public_key, int(requested_amount * 1e9))], subtract_fee=True)
+        return Response({'message': 'withdrawal was successful.',
+                         'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
