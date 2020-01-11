@@ -16,3 +16,5 @@ test:
   - sleep 3
   - sudo -u postgres psql -c "CREATE USER ergo WITH PASSWORD 'ergo' SUPERUSER;"
   - python3 manage.py test
+  - coverage run --omit="*/migrations/*","*/wsgi.py","*/urls.py","*/settings.py","*/production.py" --source=core,ErgoAccounting manage.py test -v 2
+  - coverage report --fail-under=85
