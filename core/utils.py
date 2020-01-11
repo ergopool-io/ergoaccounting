@@ -203,128 +203,34 @@ def compute_hash_rate(by, to=timezone.now(), pk=None):
     return miners
 
 
-def node_request(api, data=None, request_type="get"):
+def node_request(api, header, data=None, request_type="get"):
     """
     Function for request to node
     :param api: string
+    :param header: dict
     :param data: For request post use this
     :param request_type: For select ypt of request get or post
     :return: response of request
-"""
-    header = {
-        'accept': 'application/json',
-        'content-type': 'application/json',
-        'api_key': API_KEY
-    }
-
+    """
     try:
-        if request_type == "get":
-            logger.critical(urljoin(NODE_ADDRESS, api))
-            response = requests.get(urljoin(NODE_ADDRESS, api), headers=header)
-            json_response = response.json()
-
-            if not response.status_code == 200:
-                output = {'response': json_response, 'status': 'error'}
-
-            else:
-                output = {'response': json_response, 'status': 'success'}
-
-        else:  # request_type is post
-            response = requests.post(urljoin(NODE_ADDRESS, api), json.dumps(data), headers=header)
-            json_response = response.json()
-
-            if not response.status_code == 200:
-                output = {'response': json_response, 'status': 'error'}
-
-            else:
-                output = {'response': json_response, 'status': 'success'}
-
-        return output
-
-    except requests.exceptions.RequestException as e:
-        logger.critical("Can not resolve response from node")
-
-        response = {'status': 'error',
-                    'message': 'Can not resolve response from node'}
-        raise Exception(response)
-
-
-def generate_and_send_transaction(outputs, subtract_fee=False):
-    """
-    This function generates transactions for each chunk of outputs based on configuration
-    parameter, for example if len(outputs) is 40 and the so called parameter is 15 then it generates
-    three transactions where they contain 15, 15, 10 outputs each
-    miners with specified pks in output must be present.
-    Checking whether requested withdrawal is valid or not must be done before calling this function!
-    Raises Exception if node returns error.
-    :param outputs: list of tuples (pk, value), value must be erg * 1e9. so for 10 ergs, value is 10e9
-    :param subtract_fee: whether to subtract fee from each output or not
-    :return: nothing
-    :effect: creates balance for miners specified by each pk
-    """
-    # if output is empty
-    if not outputs:
-        return
-
-    MAX_NUMBER_OF_OUTPUTS = Configuration.objects.MAX_NUMBER_OF_OUTPUTS
-    TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
-
-    pk_to_miner = {
-        miner.public_key: miner for miner in Miner.objects.filter(public_key__in=[x[0] for x in outputs])
-    }
-
-    # getting all unspent boxes
-    res = node_request('wallet/boxes/unspent')
-    if res['status'] != 'success':
-        logger.critical('can not retrieve boxes from node')
-        return
-
-    boxes = res['response']
-    # creating chunks of size MAX_NUMBER_OF_OUTPUT from outputs
-    outputs = [outputs[i:i + MAX_NUMBER_OF_OUTPUTS] for i in range(0, len(outputs), MAX_NUMBER_OF_OUTPUTS)]
-
-    to_use_box_ind = 0
-    # generate and send transaction for each chunk
-    for chunk in outputs:
-        needed_erg = sum(x[1] for x in chunk)
-        needed_erg += TRANSACTION_FEE if not subtract_fee else 0
-        to_use_boxes = []
-        to_use_boxes_value_sum = 0
-        # take enough boxes for this chunk value sum
-        while to_use_box_ind < len(boxes) and to_use_boxes_value_sum < needed_erg:
-            box = boxes[to_use_box_ind]
-            res = node_request(urljoin('utxo/byIdBinary/', box['box']['boxId']))
-            if res['status'] != 'success':
-                logger.critical('can not retrieve box info from node')
-                return
-
-            byte = res['response']['bytes']
-            to_use_boxes.append(byte)
-            to_use_boxes_value_sum += box['box']['value']
-            to_use_box_ind += 1
-
-        if to_use_boxes_value_sum < needed_erg:
-            logger.critical('Not enough boxes for withdrawal!')
-            return
-
-        data = {
-            'requests': [{
-                'address': x[0],
-                'value': x[1] - (TRANSACTION_FEE if subtract_fee else 0)
-            } for x in chunk],
-            'fee': TRANSACTION_FEE,
-            'inputsRaw': to_use_boxes
+        # check allowed methods
+        if request_type not in ['get', 'post', 'put', 'patch', 'option']:
+            return {"status": "error", "response": "invalid request type"}
+        # requests kwargs generated
+        kwargs = {"headers": header}
+        # append data to kwargs if exists
+        if data:
+            kwargs["data"] = json.dumps(data)
+        # call requests method according to request_type
+        response = getattr(requests, request_type)(urljoin(NODE_ADDRESS, api), **kwargs)
+        response_json = response.json()
+        # check status code 2XX range is success
+        return {
+            "response": response_json,
+            "status": "success" if 200 <= response.status_code <= 299 else "External Error"
         }
-
-        # create balances with status pending_withdrawal
-        balances = [Balance(miner=pk_to_miner[pk],
-                            balance=-value/1e9, status=3) for pk, value in chunk]
-        Balance.objects.bulk_create(balances)
-
-        res = node_request('wallet/transaction/send', data=data, request_type='post')
-
-        if res['status'] != 'success':
-            Balance.objects.filter(id__in=[balance.id for balance in balances]).delete()
-            logger.critical('can not create and send the transaction {}'.format(data))
-            return
-
+    except requests.exceptions.RequestException as e:
+        logger.error("Can not resolve response from node")
+        logger.error(e)
+        response = {'status': 'error', 'message': 'Can not resolve response from node'}
+        raise Exception(response)

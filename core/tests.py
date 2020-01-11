@@ -10,7 +10,7 @@ from django.utils import timezone
 import json
 from pydoc import locate
 
-from core.utils import RewardAlgorithm, compute_hash_rate, generate_and_send_transaction
+from core.utils import RewardAlgorithm, compute_hash_rate
 from core.models import Miner, Share, Configuration, CONFIGURATION_KEY_CHOICE, CONFIGURATION_KEY_TO_TYPE, Balance, CONFIGURATION_DEFAULT_KEY_VALUE
 from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS
 from core.tasks import periodic_withdrawal, generate_and_send_transaction
