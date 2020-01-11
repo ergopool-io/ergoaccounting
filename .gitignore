@@ -15,3 +15,4 @@ pip-selfcheck.json
 .important.log
 .coverage
 celerybeat-schedule
+htmlcov

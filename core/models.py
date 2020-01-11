@@ -7,16 +7,26 @@ logger = logging.getLogger(__name__)
 
 
 CONFIGURATION_KEY_CHOICE = (
+    # total reward of a round
     ("TOTAL_REWARD", "TOTAL_REWARD"),
+    # maximum reward anyone can receive in reward sharing
     ("MAX_REWARD", "MAX_REWARD"),
     ("PPLNS_N", "PPLNS_N"),
-    ("FEE", "FEE"),
-    ("PERIOD_TIME", "PERIOD_TIME"),
+    # pool fee which will be subtracted form reward before sharing
+    ("FEE", "POOL_FEE"),
+    # period time of hash rate
+    ("PERIOD_TIME", "HASH_PERIOD_TIME"),
+    # reward algorithm used for sharing reward
     ("REWARD_ALGORITHM", "REWARD_ALGORITHM"),
+    # transaction fee of a transaction
     ("TRANSACTION_FEE", "TRANSACTION_FEE"),
+    # maximum number of outputs a transaction can have
     ("MAX_NUMBER_OF_OUTPUTS", "MAX_NUMBER_OF_OUTPUTS"),
+    # miner can not set his withdrawal threshold smaller than this
     ("MIN_WITHDRAW_THRESHOLD", "MIN_WITHDRAW_THRESHOLD"),
+    # miner can not set his withdrawal threshold bigger than this
     ("MAX_WITHDRAW_THRESHOLD", "MAX_WITHDRAW_THRESHOLD"),
+    # default value for periodic withdrawal if not set by miner explicitly
     ("DEFAULT_WITHDRAW_THRESHOLD", "DEFAULT_WITHDRAW_THRESHOLD")
 )
 
