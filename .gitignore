@@ -13,4 +13,5 @@ include/
 pip-selfcheck.json
 .venv/*
 .important.log
+.coverage
 celerybeat-schedule
