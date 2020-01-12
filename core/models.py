@@ -18,7 +18,7 @@ CONFIGURATION_KEY_CHOICE = (
     ("PERIOD_TIME", "HASH_PERIOD_TIME"),
     # reward algorithm used for sharing reward
     ("REWARD_ALGORITHM", "REWARD_ALGORITHM"),
-    # transaction fee of a transaction
+    # transaction fee of a transaction, 0.001
     ("TRANSACTION_FEE", "TRANSACTION_FEE"),
     # maximum number of outputs a transaction can have
     ("MAX_NUMBER_OF_OUTPUTS", "MAX_NUMBER_OF_OUTPUTS"),
@@ -51,7 +51,7 @@ CONFIGURATION_DEFAULT_KEY_VALUE = {
     'FEE': 0.0,
     'PERIOD_TIME': 24 * 60 * 60,
     'REWARD_ALGORITHM': 'Prop',
-    'TRANSACTION_FEE': 1000000,
+    'TRANSACTION_FEE': 0.001,
     "MAX_NUMBER_OF_OUTPUTS": 5,
     "MAX_WITHDRAW_THRESHOLD": 100,
     "MIN_WITHDRAW_THRESHOLD": 1,
@@ -95,7 +95,8 @@ class Balance(models.Model):
     STATUS_CHOICE = (
         (1, "immature"),
         (2, "mature"),
-        (3, "withdraw")
+        (3, "withdraw"),
+        (4, "pending_withdrawal")
     )
 
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
