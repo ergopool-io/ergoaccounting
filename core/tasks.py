@@ -1,6 +1,8 @@
 import logging
 from urllib.parse import urljoin
 
+from django.db.models import Q
+
 from ErgoAccounting.celery import app
 from core.models import Miner, Balance, Configuration
 from core.utils import node_request
@@ -16,14 +18,20 @@ def periodic_withdrawal():
     to withdraw the balance.
     :return:
     """
+
     miners = Miner.objects.all()
+
+    pk_to_miner = {
+        miner.public_key: miner for miner in miners
+    }
+
     # miners to their balances
     pk_to_total_balance = {
         miner.public_key: 0 for miner in miners
     }
 
-    # update miners balances
-    balances = Balance.objects.filter(status__in=[2, 3])
+    # update miners balances, balances with "withdraw", "pending_withdrawal" and "mature" status
+    balances = Balance.objects.filter(status__in=[2, 3, 4])
     for balance in balances:
         pk_to_total_balance[balance.miner.public_key] += balance.balance
 
@@ -43,6 +51,9 @@ def periodic_withdrawal():
     # call the approprate function for withdrawal
     try:
         logger.info('Periodic withdrawal for #{} miners'.format(len(outputs)))
+        # Creating balance object with pending_withdrawal status
+        objects = [Balance(miner=pk_to_miner.get(pk), status=4, balance=-balance/1e9) for pk, balance in outputs]
+        Balance.objects.bulk_create(objects)
         generate_and_send_transaction(outputs)
 
     except:
@@ -61,32 +72,41 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
     :param outputs: list of tuples (pk, value), value must be erg * 1e9. so for 10 ergs, value is 10e9
     :param subtract_fee: whether to subtract fee from each output or not
     :return: nothing
-    :effect: creates balance for miners specified by each pk
+    :effect: creates balance for miners specified by each pk. must remove pending balances in any case
     """
-    # if output is empty
-    if not outputs:
-        return
-
-    MAX_NUMBER_OF_OUTPUTS = Configuration.objects.MAX_NUMBER_OF_OUTPUTS
-    TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
 
     pk_to_miner = {
         miner.public_key: miner for miner in Miner.objects.filter(public_key__in=[x[0] for x in outputs])
     }
 
+    # this function removes pending_withdrawal balances related to the outputs
+    def remove_pending_balances(outputs):
+        q_objects = Q()
+        for pk, balance in outputs:
+            q_objects |= Q(miner=pk_to_miner.get(pk), balance=-balance/1e9, status=4)
+        Balance.objects.filter(q_objects).delete()
+
+    # if output is empty
+    if not outputs:
+        return
+
+    MAX_NUMBER_OF_OUTPUTS = Configuration.objects.MAX_NUMBER_OF_OUTPUTS
+    TRANSACTION_FEE = int(Configuration.objects.TRANSACTION_FEE * 1e9)
+
     # getting all unspent boxes
     res = node_request('wallet/boxes/unspent')
     if res['status'] != 'success':
         logger.critical('can not retrieve boxes from node')
+        remove_pending_balances(outputs)
         return
 
     boxes = res['response']
     # creating chunks of size MAX_NUMBER_OF_OUTPUT from outputs
-    outputs = [outputs[i:i + MAX_NUMBER_OF_OUTPUTS] for i in range(0, len(outputs), MAX_NUMBER_OF_OUTPUTS)]
 
     to_use_box_ind = 0
     # generate and send transaction for each chunk
-    for chunk in outputs:
+    for chuck_start in range(0, len(outputs), MAX_NUMBER_OF_OUTPUTS):
+        chunk = outputs[chuck_start:chuck_start + MAX_NUMBER_OF_OUTPUTS]
         needed_erg = sum(x[1] for x in chunk)
         needed_erg += TRANSACTION_FEE if not subtract_fee else 0
         to_use_boxes = []
@@ -98,7 +118,8 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
             if res['status'] != 'success':
                 logger.critical('can not retrieve box info from node')
                 to_use_box_ind += 1
-                continue
+                remove_pending_balances(outputs[chuck_start:])
+                return
 
             byte = res['response']['bytes']
             to_use_boxes.append(byte)
@@ -109,6 +130,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
         logger.critical(to_use_boxes_value_sum / 1e9)
         if to_use_boxes_value_sum < needed_erg:
             logger.critical('Not enough boxes for withdrawal!')
+            remove_pending_balances(outputs[chuck_start:])
             return
 
         data = {
@@ -121,6 +143,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
         }
 
         # create balances with status pending_withdrawal
+        remove_pending_balances(chunk)
         balances = [Balance(miner=pk_to_miner[pk],
                             balance=-value/1e9, status=3) for pk, value in chunk]
         Balance.objects.bulk_create(balances)
@@ -130,5 +153,8 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
         if res['status'] != 'success':
             Balance.objects.filter(id__in=[balance.id for balance in balances]).delete()
             logger.critical('can not create and send the transaction {}'.format(data))
+            remove_pending_balances(outputs[chuck_start + MAX_NUMBER_OF_OUTPUTS:])
             return
+
+
 

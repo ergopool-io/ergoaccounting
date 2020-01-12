@@ -268,9 +268,10 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
         this action specifies withdraw action of the miner.
         runs a celery task in case that the request is valid
         """
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
         miner = self.get_object()
-        balances = Balance.objects.filter(miner=miner, status__in=[2, 3])
-        total = sum(b.balance for b in balances)
+        # balances with "mature", "withdraw" and "pending_withdrawal" status
+        total = Balance.objects.filter(miner=miner, status__in=[2, 3, 4]).aggregate(Sum('balance')).get('balance__sum')
 
         requested_amount = request.data.get('withdraw_amount')
         try:
@@ -281,10 +282,15 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
         except:
             return Response({'message': 'withdraw_amount field is not valid.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if requested_amount < TRANSACTION_FEE:
+            return Response({'message': 'withdraw_amount must be bigger than transaction fee: {}.'.format(TRANSACTION_FEE)}, status=status.HTTP_400_BAD_REQUEST)
+
         if requested_amount > total:
             return Response({'message': 'withdraw_amount is bigger than total balance.'},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        # creating a pending_withdrawal status
+        Balance.objects.create(miner=miner, balance=-requested_amount, status=4)
         generate_and_send_transaction.delay([(miner.public_key, int(requested_amount * 1e9))], subtract_fee=True)
         return Response({'message': 'withdrawal was successful.',
                          'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
