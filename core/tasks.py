@@ -54,6 +54,7 @@ def periodic_withdrawal():
         # Creating balance object with pending_withdrawal status
         objects = [Balance(miner=pk_to_miner.get(pk), status=4, balance=-balance/1e9) for pk, balance in outputs]
         Balance.objects.bulk_create(objects)
+        outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
         generate_and_send_transaction(outputs)
 
     except:
@@ -69,7 +70,8 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
     miners with specified pks in output must be present.
     Checking whether requested withdrawal is valid or not must be done before calling this function!
     Raises Exception if node returns error.
-    :param outputs: list of tuples (pk, value), value must be erg * 1e9. so for 10 ergs, value is 10e9
+    :param outputs: list of tuples (pk, value, id), value must be erg * 1e9. so for 10 ergs, value is 10e9;
+    id: id of balance object with status pending_withdrawal associated with this item
     :param subtract_fee: whether to subtract fee from each output or not
     :return: nothing
     :effect: creates balance for miners specified by each pk. must remove pending balances in any case
@@ -81,10 +83,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
 
     # this function removes pending_withdrawal balances related to the outputs
     def remove_pending_balances(outputs):
-        q_objects = Q()
-        for pk, balance in outputs:
-            q_objects |= Q(miner=pk_to_miner.get(pk), balance=-balance/1e9, status=4)
-        Balance.objects.filter(q_objects).delete()
+        Balance.objects.filter(pk__in=[x[2] for x in outputs]).delete()
 
     # if output is empty
     if not outputs:
@@ -145,7 +144,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
         # create balances with status pending_withdrawal
         remove_pending_balances(chunk)
         balances = [Balance(miner=pk_to_miner[pk],
-                            balance=-value/1e9, status=3) for pk, value in chunk]
+                            balance=-value/1e9, status=3) for pk, value, _ in chunk]
         Balance.objects.bulk_create(balances)
 
         res = node_request('wallet/transaction/send', data=data, request_type='post')
