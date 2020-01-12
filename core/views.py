@@ -290,7 +290,8 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
                             status=status.HTTP_400_BAD_REQUEST)
 
         # creating a pending_withdrawal status
-        Balance.objects.create(miner=miner, balance=-requested_amount, status=4)
-        generate_and_send_transaction.delay([(miner.public_key, int(requested_amount * 1e9))], subtract_fee=True)
+        balance = Balance.objects.create(miner=miner, balance=-requested_amount, status=4)
+        generate_and_send_transaction.delay([(miner.public_key, int(requested_amount * 1e9), balance.pk)],
+                                            subtract_fee=True)
         return Response({'message': 'withdrawal was successful.',
                          'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
