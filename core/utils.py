@@ -203,7 +203,7 @@ def compute_hash_rate(by, to=timezone.now(), pk=None):
     return miners
 
 
-def node_request(api, header, data=None, request_type="get"):
+def node_request(api, header=None, data=None, request_type="get"):
     """
     Function for request to node
     :param api: string
@@ -212,6 +212,13 @@ def node_request(api, header, data=None, request_type="get"):
     :param request_type: For select ypt of request get or post
     :return: response of request
     """
+    if header is None:
+        header = {
+            'accept': 'application/json',
+            'content-type': 'application/json',
+            'api_key': API_KEY
+        }
+
     try:
         # check allowed methods
         if request_type not in ['get', 'post', 'put', 'patch', 'option']:

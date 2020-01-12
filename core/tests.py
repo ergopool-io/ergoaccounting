@@ -904,6 +904,7 @@ def mocked_node_request_transaction_generate_test(*args, **kwargs):
 class TransactionGenerateTestCase(TestCase):
     """
     Test class for transaction generate and send method
+    Balance statuses: 2: mature, 3: withdraw, 4: pending_withdrawal
     """
 
     def setUp(self):
@@ -927,7 +928,11 @@ class TransactionGenerateTestCase(TestCase):
         calling the function with all outputs and MAX_NUMBER_OF_OUTPUT = 4
         must create 3 transactions and required balances
         """
-        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        for pk, balance in self.outputs:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e9, status=4)
+
+        TRANSACTION_FEE = int(Configuration.objects.TRANSACTION_FEE * 1e9)
         generate_and_send_transaction(self.outputs)
         chunks = [self.outputs[i:i + 4] for i in range(0, len(self.outputs), 4)]
         reqs = [{
@@ -949,14 +954,20 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs[2], request_type='post')
 
         for pk, value in self.outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9, status=3).count(), 1)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
 
     def test_generate_one_transactions_max_num_output_4(self, mocked_request):
         """
         calling the function with 4 outputs and MAX_NUMBER_OF_OUTPUT = 4
         must create 1 transactions and required balances
         """
-        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        for pk, balance in self.outputs[0:4]:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e9, status=4)
+
+        TRANSACTION_FEE = int(Configuration.objects.TRANSACTION_FEE * 1e9)
         generate_and_send_transaction(self.outputs[0:4])
         outputs = self.outputs[0:4]
         chunks = [outputs[i:i + 4] for i in range(0, len(outputs), 4)]
@@ -975,15 +986,21 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs[0], request_type='post')
 
         for pk, value in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9, status=3).count(), 1)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
 
     def test_generate_three_transactions_max_num_output_20(self, mocked_request):
         """
         calling the function with all outputs and MAX_NUMBER_OF_OUTPUT = 20
         must create 1 transactions and required balances
         """
+        for pk, balance in self.outputs:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e9, status=4)
+
         Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='20')
-        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        TRANSACTION_FEE = int(Configuration.objects.TRANSACTION_FEE * 1e9)
         generate_and_send_transaction(self.outputs)
         reqs = {
             'requests': [
@@ -999,15 +1016,21 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
 
         for pk, value in self.outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9, status=3).count(), 1)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
 
     def test_one_output_with_fee(self, mocked_request):
         """
         calling the function with one output and MAX_NUMBER_OF_OUTPUT = 10 and subtract_fee = true
         must create 1 transactions with subtracted value and required balances
         """
+        for pk, balance in self.outputs[9:]:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e9, status=4)
+
         Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='10')
-        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        TRANSACTION_FEE = int(Configuration.objects.TRANSACTION_FEE * 1e9)
         generate_and_send_transaction(self.outputs[9:], subtract_fee=True)
         reqs = {
             'requests': [
@@ -1023,7 +1046,9 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
 
         for pk, value in self.outputs[9:]:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9, status=3).count(), 1)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
 
     def test_node_generate_and_send_request_error(self, mocked_request):
         """
@@ -1034,10 +1059,88 @@ class TransactionGenerateTestCase(TestCase):
         outputs = self.outputs[:]
         Miner.objects.create(public_key='invalid_input')
         outputs[0] = ('invalid_input', int(1e10))
+
+        for pk, balance in outputs:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e9, status=4)
+
         generate_and_send_transaction(outputs)
 
         for pk, value in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9).count(), 0)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9, status=3).count(), 0)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
+
+    def test_generate_one_transactions_max_num_output_4_with_other_pending(self, mocked_request):
+        """
+        calling the function with 4 outputs and MAX_NUMBER_OF_OUTPUT = 4
+        must create 1 transactions and required balances
+        other pending_withdrawal balance is present, they must not be deleted
+        """
+        for pk, balance in self.outputs[0:4]:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e9, status=4)
+
+        for pk, balance in self.outputs:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e10, status=4)
+
+        TRANSACTION_FEE = int(Configuration.objects.TRANSACTION_FEE * 1e9)
+        generate_and_send_transaction(self.outputs[0:4])
+        outputs = self.outputs[0:4]
+        chunks = [outputs[i:i + 4] for i in range(0, len(outputs), 4)]
+        reqs = [{
+            'requests': [
+                {
+                    'address': pk,
+                    'value': value
+                } for pk, value in chunk
+            ],
+            'fee': TRANSACTION_FEE,
+            'inputsRaw': []
+        } for chunk in chunks]
+
+        reqs[0]['inputsRaw'] = ['a', 'b', 'c', 'd']
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs[0], request_type='post')
+
+        for pk, value in outputs:
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9, status=3).count(), 1)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), len(self.outputs))
+
+    def test_generate_three_transactions_max_num_output_20_with_other_pending(self, mocked_request):
+        """
+        calling the function with all outputs and MAX_NUMBER_OF_OUTPUT = 20
+        must create 1 transactions and required balances
+        """
+        for pk, balance in self.outputs:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e9, status=4)
+
+        for pk, balance in self.outputs[0:4]:
+            miner = Miner.objects.get(public_key=pk)
+            Balance.objects.create(miner=miner, balance=-balance/1e10, status=4)
+
+        Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='20')
+        TRANSACTION_FEE = int(Configuration.objects.TRANSACTION_FEE * 1e9)
+        generate_and_send_transaction(self.outputs)
+        reqs = {
+            'requests': [
+                {
+                    'address': pk,
+                    'value': value
+                } for pk, value in self.outputs
+            ],
+            'fee': TRANSACTION_FEE,
+            'inputsRaw': [x for x in 'abcdefghi']
+        }
+
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
+
+        for pk, value in self.outputs:
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value/1e9, status=3).count(), 1)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 4)
 
     def tearDown(self):
         """
@@ -1053,6 +1156,7 @@ class TransactionGenerateTestCase(TestCase):
 class PeriodicWithdrawalTestCase(TestCase):
     """
     Test class for periodic withdrawal and send method
+    Balance statuses: 2: mature, 3: withdraw, 4: pending_withdrawal
     """
 
     def setUp(self):
@@ -1082,6 +1186,7 @@ class PeriodicWithdrawalTestCase(TestCase):
         all miners balances are below default threshold
         """
         periodic_withdrawal()
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
         mocked_generate_txs.assert_has_calls([call([])])
 
     def test_all_miners_except_one_below_default_threshold(self, mocked_generate_txs):
@@ -1091,6 +1196,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         Balance.objects.create(miner=self.miners[0], balance=100, status=2)
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([(self.miners[0].public_key, int(180e9))])])
+
+        self.assertEqual(Balance.objects.filter(miner=self.miners[0], balance=-180, status=4).count(), 1)
 
     def test_all_miner_below_default_threshold_one_explicit_threshold(self, mocked_generate_txs):
         """
@@ -1102,6 +1209,9 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner.save()
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([(miner.public_key, int(80e9))])])
+
+        self.assertEqual(Balance.objects.filter(miner=miner, balance=-80, status=4).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=4).count(), 1)
 
     def test_all_miner_below_default_threshold_two_explicit_threshold(self, mocked_generate_txs):
         """
@@ -1117,6 +1227,9 @@ class PeriodicWithdrawalTestCase(TestCase):
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([(miner1.public_key, int(80e9)),
                                                     (miner2.public_key, int(80e9))])])
+        for miner in [miner1, miner2]:
+            self.assertEqual(Balance.objects.filter(miner=miner, balance=-80, status=4).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=4).count(), 2)
 
     def test_all_miners_but_one_below_default_threshold_two_explicit_threshold_one_not_above(self, mocked_generate_txs):
         """
@@ -1127,11 +1240,13 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner1.periodic_withdrawal_amount = 20
         miner1.save()
         miner2 = self.miners[1]
-        miner2.periodic_withdrawal_amount = 80
+        miner2.periodic_withdrawal_amount = 90
         miner2.save()
         periodic_withdrawal()
-        mocked_generate_txs.assert_has_calls([call([(miner1.public_key, int(80e9)),
-                                                    (miner2.public_key, int(80e9))])])
+        mocked_generate_txs.assert_has_calls([call([(miner1.public_key, int(80e9))])])
+
+        self.assertEqual(Balance.objects.filter(miner=miner1, balance=-80, status=4).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=4).count(), 1)
 
     def test_all_miners_but_one_below_default_one_above_default_below_explicit(self, mocked_generate_txs):
         """
@@ -1145,6 +1260,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([])])
 
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
+
     def test_all_miners_above_default_but_one(self, mocked_generate_txs):
         """
         all miners balances are above default threshold but one
@@ -1156,6 +1273,10 @@ class PeriodicWithdrawalTestCase(TestCase):
         outputs = [(miner.public_key, int(110e9)) for miner in self.miners[1:]]
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call(outputs)])
+
+        for miner in self.miners[1:]:
+            self.assertEqual(Balance.objects.filter(miner=miner, balance=-110, status=4).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=4).count(), len(self.miners) - 1)
 
     def test_all_miners_above_default_but_one_no_balance(self, mocked_generate_txs):
         """
@@ -1170,6 +1291,10 @@ class PeriodicWithdrawalTestCase(TestCase):
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call(outputs)])
 
+        for miner in self.miners[1:]:
+            self.assertEqual(Balance.objects.filter(miner=miner, balance=-110, status=4).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=4).count(), len(self.miners) - 1)
+
     def test_no_balance(self, mocked_generate_txs):
         """
         no balance, empty output
@@ -1177,6 +1302,7 @@ class PeriodicWithdrawalTestCase(TestCase):
         Balance.objects.all().delete()
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([])])
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
 
     def tearDown(self):
         """
@@ -1187,9 +1313,11 @@ class PeriodicWithdrawalTestCase(TestCase):
         Miner.objects.all().delete()
         # delete all miners objects. all related objects are deleted
 
+
 class MinerViewTestCase(TestCase):
     """
     Test class for MinerView
+    Balance statuses: 2: mature, 3: withdraw, 4: pending_withdrawal
     """
 
     def setUp(self):
@@ -1213,7 +1341,6 @@ class MinerViewTestCase(TestCase):
         for miner in Miner.objects.all():
             Balance.objects.create(miner=miner, balance=100, status=2)
             Balance.objects.create(miner=miner, balance=-20, status=3)
-
 
     def get_threshold_url(self, pk):
         return urljoin('/miner/', pk) + '/'
@@ -1305,6 +1432,25 @@ class MinerViewTestCase(TestCase):
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
 
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_invalid_amount_smaller_than_fee(self, mocked_generate_and_send_txs):
+        """
+        withdraw type is not valid
+        """
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': TRANSACTION_FEE / 2
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
+
     @patch('core.views.generate_and_send_transaction')
     def test_withdraw_not_enough_balance(self, mocked_generate_and_send_txs):
         """
@@ -1317,9 +1463,26 @@ class MinerViewTestCase(TestCase):
 
         res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-
-        balances = Balance.objects.filter(miner=miner, status__in=[2, 3])
         self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 0)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_not_enough_balance_because_of_pending(self, mocked_generate_and_send_txs):
+        """
+        not enough balance for the request
+        """
+        miner = self.miners[0]
+        Balance.objects.create(miner=miner, balance=-40, status=4)
+        data = {
+            'withdraw_amount': 50
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 1)
 
     @patch('core.views.generate_and_send_transaction')
     def test_withdraw_enough_balance_successful(self, mocked_generate_and_send_txs):
@@ -1335,6 +1498,27 @@ class MinerViewTestCase(TestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         mocked_generate_and_send_txs.delay.assert_has_calls([call([(miner.public_key, int(60e9))], subtract_fee=True)])
 
+        self.assertEqual(Balance.objects.filter(status=4, miner=miner, balance=-60).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=4).count(), 1)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_enough_balance_successful_with_pending(self, mocked_generate_and_send_txs):
+        """
+        enough balance, successful
+        """
+        miner = self.miners[0]
+        Balance.objects.create(miner=miner, balance=10, status=4)
+        data = {
+            'withdraw_amount': 60
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        mocked_generate_and_send_txs.delay.assert_has_calls([call([(miner.public_key, int(60e9))], subtract_fee=True)])
+
+        self.assertEqual(Balance.objects.filter(status=4, miner=miner, balance=-60).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=4).count(), 2)
+
     @patch('core.views.generate_and_send_transaction')
     def test_withdraw_all_balance_successful(self, mocked_generate_and_send_txs):
         """
@@ -1348,6 +1532,9 @@ class MinerViewTestCase(TestCase):
         res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         mocked_generate_and_send_txs.delay.assert_has_calls([call([(miner.public_key, int(80e9))], subtract_fee=True)])
+
+        self.assertEqual(Balance.objects.filter(status=4, miner=miner, balance=-80).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=4).count(), 1)
 
     def tearDown(self):
         """
