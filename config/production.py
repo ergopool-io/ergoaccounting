@@ -75,7 +75,8 @@ LOGGING = {
 }
 
 # set your approprate broker url, e.g, rabbitmq or redis
-broker_url = 'amqp://guest:guest@localhost:5672//'
+broker_url = os.environ.get("BROKER_URL")
+#'amqp://guest:guest@localhost:5672//'
 
 # for interval of the periodic task PERIODIC_WITHDRAWAL_INTERVAL should be set
 # default interval is 24h, it is also possible to change the crontime to a
