@@ -2,7 +2,13 @@ import json
 import random
 import string
 import uuid
+from django.test import TestCase, Client, TransactionTestCase
+from mock import patch, call
+from .views import *
+from urllib.parse import urljoin
 from datetime import datetime, timedelta
+from django.utils import timezone
+import json
 from pydoc import locate
 from urllib.parse import urljoin
 
@@ -11,6 +17,7 @@ from django.utils import timezone
 from mock import patch, call
 
 from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS
+from core.tasks import periodic_withdrawal, generate_and_send_transaction, immature_to_mature
 from core.models import Miner, Share, Configuration, CONFIGURATION_KEY_CHOICE, CONFIGURATION_KEY_TO_TYPE, Balance, \
     CONFIGURATION_DEFAULT_KEY_VALUE
 from core.tasks import periodic_withdrawal, generate_and_send_transaction
@@ -1559,4 +1566,218 @@ class MinerViewTestCase(TestCase):
         Configuration.objects.all().delete()
         Miner.objects.all().delete()
         # delete all miners objects. all related objects are deleted
+
+
+
+class ImmatureToMatureTestCase(TestCase):
+    """
+    Test class for immature_to_mature function
+    """
+    CURRENT_HEIGHT = 20000
+
+    def mocked_node_request(*args, **kwargs):
+        """
+        mock requests with method post
+        """
+        url = args[0]
+
+        if url == 'info':
+            return {
+                'response': {'fullHeight': ImmatureToMatureTestCase.CURRENT_HEIGHT},
+                'status': 'success'
+            }
+
+        if url == 'wallet/transactionById':
+            params = kwargs['params']
+            num_confirmation = int(params['id'].split('_')[1])
+            return {
+                'response': {'numConfirmations': num_confirmation},
+                'status': 'success'
+            }
+
+        return {
+            'response': None,
+            'status': 'error'
+        }
+
+    def setUp(self):
+        """
+        creates necessary configuration and objects and a default output list
+        20 confirmed shares
+        5 valid shares
+        5 unconfirmed shares
+        10 miner
+        for each miner and share: 3 balance with different statuses
+        :return:
+        """
+        self.client = Client()
+        self.CURRENT_HEIGHT = ImmatureToMatureTestCase.CURRENT_HEIGHT
+
+        # setting configuration
+        Configuration.objects.create(key='CONFIRMATION_LENGTH', value='720')
+
+        # creating 10 miners
+        pks = [random_string() for i in range(10)]
+        for pk in pks:
+            Miner.objects.create(public_key=pk)
+
+        self.miners = Miner.objects.all()
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        for i in range(5):
+            # not important shares
+            num_confirmation = CONFIRMATION_LENGTH + 10
+            block_height = self.CURRENT_HEIGHT - num_confirmation
+            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
+                                 block_height=block_height, status='valid')
+
+            # confirmed shares
+            num_confirmation = CONFIRMATION_LENGTH + 10
+            block_height = self.CURRENT_HEIGHT - num_confirmation
+            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
+                                 block_height=block_height, status='solved')
+
+            # confirmed just now
+            num_confirmation = CONFIRMATION_LENGTH
+            block_height = self.CURRENT_HEIGHT - num_confirmation
+            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
+                                 block_height=block_height, status='solved')
+
+            # unconfirmed shares
+            num_confirmation = CONFIRMATION_LENGTH - 10
+            block_height = self.CURRENT_HEIGHT - num_confirmation
+            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
+                                 block_height=block_height, status='solved')
+
+        # by default all shares have immature balances for each miner
+        for share in Share.objects.all():
+            for miner in self.miners:
+                Balance.objects.create(share=share, miner=miner, balance=100, status=1)
+                Balance.objects.create(share=share, miner=miner, balance=100, status=2)
+                Balance.objects.create(miner=miner, balance=-20, status=3)
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    def test_20_shares_possible_20_confirmed(self, mocked_node_request):
+        """
+        20 shares have immature balances and their block_height is less than the threshold
+        the same 20 shares are confirmed
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        confirmed_shares = [x.id for x in Share.objects.filter(balance__status=1,
+                                                               block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                                               status='solved').distinct()]
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        immature_to_mature()
+        for balance in Balance.objects.all():
+            if balance.share is None or balance.share.id not in confirmed_shares:
+                self.assertEqual(balance.status, balances_to_status[balance.id])
+
+            else:
+                if balances_to_status[balance.id] == 1:
+                    self.assertEqual(balance.status, 2)
+
+                else:
+                    self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    def test_20_shares_possible_15_confirmed(self, mocked_node_request):
+        """
+        20 shares have immature balances and their block_height is less than the threshold
+        15 of these shares are confirmed
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        cur_unconfirmed = Share.objects.filter(balance__status=1,
+                                               block_height=(current_height - CONFIRMATION_LENGTH),
+                                               status='solved').distinct()[:5]
+        for share in cur_unconfirmed:
+            num_confirmed = int(share.transaction_id.split('_')[-1])
+            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 1)])
+            share.save()
+
+        cur_unconfirmed = [x.id for x in cur_unconfirmed]
+
+        confirmed_shares = [x.id for x in Share.objects.filter(balance__status=1,
+                                                               block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                                               status='solved').distinct() if
+                            x.id not in cur_unconfirmed]
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        immature_to_mature()
+        for balance in Balance.objects.all():
+            if balance.share is None or balance.share.id not in confirmed_shares:
+                self.assertEqual(balance.status, balances_to_status[balance.id])
+
+            else:
+                if balances_to_status[balance.id] == 1:
+                    self.assertEqual(balance.status, 2)
+
+                else:
+                    self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    def test_20_shares_possible_0_confirmed(self, mocked_node_request):
+        """
+        20 shares have immature balances and their block_height is less than the threshold
+        0 of these shares are confirmed
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        cur_unconfirmed = Share.objects.filter(balance__status=1,
+                                               block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                               status='solved').distinct()
+        for share in cur_unconfirmed:
+            num_confirmed = int(share.transaction_id.split('_')[-1])
+            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 100)])
+            share.save()
+
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        immature_to_mature()
+        for balance in Balance.objects.all():
+            self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    def test_0_shares_possible_0_confirmed(self, mocked_node_request):
+        """
+        0 shares have immature balances and their block_height is less than the threshold
+        0 of these shares are confirmed
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        cur_unconfirmed = Share.objects.filter(balance__status=1,
+                                               block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                               status='solved').distinct()
+        for share in cur_unconfirmed:
+            share.block_height = current_height
+            share.save()
+
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        immature_to_mature()
+        for balance in Balance.objects.all():
+            self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    def tearDown(self):
+        """
+        tearDown function to clean up objects created in setUp function
+        :return:
+        """
+        Configuration.objects.all().delete()
+        Miner.objects.all().delete()
+        Share.objects.all().delete()
+        Balance.objects.all().delete()
 
