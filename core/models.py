@@ -27,7 +27,9 @@ CONFIGURATION_KEY_CHOICE = (
     # miner can not set his withdrawal threshold bigger than this
     ("MAX_WITHDRAW_THRESHOLD", "MAX_WITHDRAW_THRESHOLD"),
     # default value for periodic withdrawal if not set by miner explicitly
-    ("DEFAULT_WITHDRAW_THRESHOLD", "DEFAULT_WITHDRAW_THRESHOLD")
+    ("DEFAULT_WITHDRAW_THRESHOLD", "DEFAULT_WITHDRAW_THRESHOLD"),
+    # confirmation length for balances to be mature
+    ("CONFIRMATION_LENGTH", "confirmation length")
 )
 
 CONFIGURATION_KEY_TO_TYPE = {
@@ -41,7 +43,8 @@ CONFIGURATION_KEY_TO_TYPE = {
     "MAX_NUMBER_OF_OUTPUTS": 'int',
     "MAX_WITHDRAW_THRESHOLD": 'float',
     "MIN_WITHDRAW_THRESHOLD": 'float',
-    "DEFAULT_WITHDRAW_THRESHOLD": 'float'
+    "DEFAULT_WITHDRAW_THRESHOLD": 'float',
+    "CONFIRMATION_LENGTH": 'int'
 }
 
 CONFIGURATION_DEFAULT_KEY_VALUE = {
@@ -55,7 +58,8 @@ CONFIGURATION_DEFAULT_KEY_VALUE = {
     "MAX_NUMBER_OF_OUTPUTS": 5,
     "MAX_WITHDRAW_THRESHOLD": 100,
     "MIN_WITHDRAW_THRESHOLD": 1,
-    "DEFAULT_WITHDRAW_THRESHOLD": 100
+    "DEFAULT_WITHDRAW_THRESHOLD": 100,
+    "CONFIRMATION_LENGTH": 720
 }
 
 

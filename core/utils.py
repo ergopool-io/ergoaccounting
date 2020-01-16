@@ -203,13 +203,14 @@ def compute_hash_rate(by, to=timezone.now(), pk=None):
     return miners
 
 
-def node_request(api, header=None, data=None, request_type="get"):
+def node_request(api, header=None, data=None, params=None, request_type="get"):
     """
     Function for request to node
     :param api: string
     :param header: dict
     :param data: For request post use this
     :param request_type: For select ypt of request get or post
+    :param params: query string
     :return: response of request
     """
     if header is None:
@@ -228,6 +229,8 @@ def node_request(api, header=None, data=None, request_type="get"):
         # append data to kwargs if exists
         if data:
             kwargs["data"] = json.dumps(data)
+        if params:
+            kwargs["params"] = params
         # call requests method according to request_type
         response = getattr(requests, request_type)(urljoin(NODE_ADDRESS, api), **kwargs)
         response_json = response.json()
