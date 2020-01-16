@@ -4,7 +4,7 @@ from urllib.parse import urljoin
 from django.db.models import Q
 
 from ErgoAccounting.celery import app
-from core.models import Miner, Balance, Configuration
+from core.models import Miner, Balance, Configuration, Share
 from core.utils import node_request
 
 logger = logging.getLogger(__name__)
@@ -155,5 +155,44 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
             remove_pending_balances(outputs[chuck_start + MAX_NUMBER_OF_OUTPUTS:])
             return
 
+
+@app.task
+def immature_to_mature():
+    """
+    function to convert immature balances to mature ones periodically if their confirmation_num
+    is at least some threshold
+    :return: nothing
+    :effect: changes status of specified balances to mature
+    """
+    logger.info('running immature to mature task.')
+
+    # getting current height
+    res = node_request('info')
+    if res['status'] != 'success':
+        logger.critical('can not get info from node! exiting.')
+        return
+
+    res = res['response']
+    current_height = res['fullHeight']
+    CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+
+    # getting all shares with immature balances which have been created at least in CONFIRMATION_LENGTH block ago
+    shares = Share.objects.filter(balance__status=1, block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                  status='solved').distinct()
+    q = Q()
+    for share in shares:
+        txt_res = node_request('wallet/transactionById', params={'id': share.transaction_id})
+        if txt_res['status'] != 'success':
+            logger.error('can not get transaction info from node for id {}! exiting.'.format(share.transaction_id))
+            continue
+
+        txt_res = txt_res['response']
+        num_confirmations = txt_res['numConfirmations']
+
+        if num_confirmations >= CONFIRMATION_LENGTH:
+            q |= Q(status=1, share=share)
+
+    if len(q) > 0:
+        Balance.objects.filter(q).update(status=2)
 
 
