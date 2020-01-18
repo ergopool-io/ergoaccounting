@@ -1,6 +1,7 @@
 from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
 from pydoc import locate
+from frozendict import frozendict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ CONFIGURATION_KEY_CHOICE = (
     ("CONFIRMATION_LENGTH", "confirmation length")
 )
 
-CONFIGURATION_KEY_TO_TYPE = {
+CONFIGURATION_KEY_TO_TYPE = frozendict({
     "TOTAL_REWARD": "float",
     "MAX_REWARD": "float",
     "PPLNS_N": "int",
@@ -45,9 +46,9 @@ CONFIGURATION_KEY_TO_TYPE = {
     "MIN_WITHDRAW_THRESHOLD": 'float',
     "DEFAULT_WITHDRAW_THRESHOLD": 'float',
     "CONFIRMATION_LENGTH": 'int'
-}
+})
 
-CONFIGURATION_DEFAULT_KEY_VALUE = {
+CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
     'TOTAL_REWARD': 65,
     'MAX_REWARD': 35,
     'PPLNS_N': 5,
@@ -60,7 +61,7 @@ CONFIGURATION_DEFAULT_KEY_VALUE = {
     "MIN_WITHDRAW_THRESHOLD": 1,
     "DEFAULT_WITHDRAW_THRESHOLD": 100,
     "CONFIRMATION_LENGTH": 720
-}
+})
 
 
 class Miner(models.Model):
