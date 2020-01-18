@@ -541,6 +541,15 @@ class ConfigurationAPITest(TestCase):
         for key, label in CONFIGURATION_KEY_CHOICE:
             self.assertEqual(getattr(Configuration.objects, key), CONFIGURATION_DEFAULT_KEY_VALUE.get(key))
 
+    def test_invalid_configuration_format(self):
+        """
+        set configuration for key TOTAL_REWARD with string value.
+        then get this configuration must return DEFAULT value of this configuration
+        :return:
+        """
+        Configuration.objects.create(key="TOTAL_REWARD", value='teststr')
+        self.assertEqual(Configuration.objects.TOTAL_REWARD, CONFIGURATION_DEFAULT_KEY_VALUE["TOTAL_REWARD"])
+
     def tearDown(self):
         """
         tearDown function to delete all configuration objects
@@ -736,7 +745,7 @@ class BlockTestCase(TestCase):
      if mined there was flag "inpool": True
     """
 
-    def mocked_get_request(*args, **kwargs):
+    def mocked_get_request(urls, params=None, **kwargs):
         """
         mock requests with method get for urls 'blocks'
         """
@@ -748,22 +757,9 @@ class BlockTestCase(TestCase):
             def json(self):
                 return self.json_data
 
-        if args[0] == urljoin(ERGO_EXPLORER_ADDRESS, 'blocks?offset=1&limit=4'):
-            with open("core/data_mock_testing/test_get_offset_limit.json", "r") as read_file:
-                response = json.load(read_file)
-            return MockResponse(response)
-
-        if "/blocks?sortBy=height&sortDirection=asc" in args[0]:
-            with open("core/data_mock_testing/test_get_sortBy_sortDirection.json", "r") as read_file:
-                response = json.load(read_file)
-            return MockResponse(response)
-
-        if "/blocks?endDate=1579811399999&startDate=1577824200000" in args[0]:
-            with open("core/data_mock_testing/test_get_period_time.json", "r") as read_file:
-                response = json.load(read_file)
-            return MockResponse(response)
-
-        return MockResponse(None)
+        with open("core/data_mock_testing/test_get_blocks.json", "r") as read_file:
+            response = json.load(read_file)
+        return MockResponse(response)
 
     def setUp(self):
         """
@@ -791,83 +787,60 @@ class BlockTestCase(TestCase):
             i = i + 1
 
     @patch("requests.get", side_effect=mocked_get_request)
-    def test_get_offset_limit(self, mock):
+    def test_get_offset_limit(self, mocked):
         """
-        Send a http 'get' request for get blocks with => offset = 1 and limit = 4 in this test, we must get 4 blocks and
-         set the inPool  flag to True if it has been mined by the miner in the pool
+        Send a http 'get' request for get blocks with => page = 1 and size = 4 in this test, we must get 4 blocks and
+         set the pool flag to True if it has been mined by the miner in the pool
         """
 
-        # Send a http 'get' request for get blocks with limits => offset = 1 and limit = 4
-        response = self.client.get('/blocks/?offset=1&limit=4')
+        # Send a http 'get' request for get blocks with limits => size = 30 and page = 1
+        response = self.client.get('/blocks/?page=1&size=4')
         # check the status of the response
         self.assertEqual(response.status_code, 200)
         response = response.json()
         # check the content of the response
-        # For check flag ' inPool'
+        # For check flag ' pool'
         blocks_pool = [3, 2]
         blocks_pool_result = []
         # For Check true block heights
         heights = [4, 3, 2, 1]
         heights_result = []
-        for res in response['results']['items']:
+        for res in response['results']:
             heights_result.append(res['height'])
-            if res['inPool']:
+            if res['pool']:
                 blocks_pool_result.append(res['height'])
 
         self.assertEqual(heights_result, heights)
         self.assertEqual(blocks_pool_result, blocks_pool)
 
     @patch("requests.get", side_effect=mocked_get_request)
-    def test_get_sort_by_direction(self, mock):
+    def test_pass_extra_queries(self, mocked):
         """
-        Send a http 'get' request for get blocks with sort according to height and direction asc.
+        call function with extra get arguments must cause pass arguments as get to api
         """
 
         # Send a http 'get' request for get blocks with sort according to height and Direction asc
-        response = self.client.get('/blocks/?sortBy=height&sortDirection=asc')
+        response = self.client.get('http://google.com/blocks/?sortBy=height&sortDirection=asc')
         # check the status of the response
         self.assertEqual(response.status_code, 200)
-        response = response.json()
-        # check the content of the response
-        # For check flag ' inPool'
-        blocks_pool = [2, 3]
-        blocks_pool_result = []
-        # For Check true block heights
-        heights = [1, 2, 3, 4]
-        heights_result = []
-        for res in response['results']['items']:
-            heights_result.append(res['height'])
-            if res['inPool']:
-                blocks_pool_result.append(res['height'])
-
-        self.assertEqual(heights_result, heights)
-        self.assertEqual(blocks_pool_result, blocks_pool)
-
-    @patch("requests.get", side_effect=mocked_get_request)
-    def test_get_period_time(self, mock):
-        """
-        Send a http 'get' request for get blocks in period time. in this test we send endDate=1579811399999 and
-         startDate=1577824200000 and we want to get blocks between this times.
-        """
-        # send a http 'get' request for get blocks in period time.
-        response = self.client.get('/blocks/?endDate=1579811399999&startDate=1577824200000')
-        # check the status of the response
-        self.assertEqual(response.status_code, 200)
-        response = response.json()
-        # check the content of the response
-        # For check flag ' inPool'
-        blocks_pool = [3, 2]
-        blocks_pool_result = []
-        # For Check true block heights
-        heights = [4, 3, 2, 1]
-        heights_result = []
-        for res in response['results']['items']:
-            heights_result.append(res['height'])
-            if res['inPool']:
-                blocks_pool_result.append(res['height'])
-
-        self.assertEqual(heights_result, heights)
-        self.assertEqual(blocks_pool_result, blocks_pool)
+        # get passed url
+        parsed_url = urlparse(mocked.call_args[0][0])
+        # get passed params to url
+        query = mocked.call_args[0][1] or {}
+        if parsed_url.query:
+            query.update(parsed_url.query)
+        # query must contain only two keys
+        self.assertEqual(sorted(list(query.keys())), ["limit", "offset", "sortBy", "sortDirection"])
+        # sortBy parameter must contains only "height"
+        sort_by = query.get("sortBy", [])
+        if isinstance(sort_by, str):
+            sort_by = [sort_by]
+        self.assertEqual(sort_by, ["height"])
+        # sortDirection parameter must contains only "asc"
+        sort_by = query.get("sortDirection", [])
+        if isinstance(sort_by, str):
+            sort_by = [sort_by]
+        self.assertEqual(sort_by, ["asc"])
 
 
 def mocked_node_request_transaction_generate_test(*args, **kwargs):
@@ -1569,7 +1542,6 @@ class MinerViewTestCase(TestCase):
         # delete all miners objects. all related objects are deleted
 
 
-
 class ImmatureToMatureTestCase(TestCase):
     """
     Test class for immature_to_mature function
@@ -1781,4 +1753,3 @@ class ImmatureToMatureTestCase(TestCase):
         Miner.objects.all().delete()
         Share.objects.all().delete()
         Balance.objects.all().delete()
-

@@ -13,17 +13,23 @@ from urllib.parse import urljoin, urlencode, urlparse, parse_qsl, urlunparse
 import requests
 import logging
 from django.conf import settings
-from core.utils import compute_hash_rate, RewardAlgorithm
+from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
-from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS, MAX_PAGINATION, DEFAULT_PAGINATION
 from core.tasks import generate_and_send_transaction
 
 logger = logging.getLogger(__name__)
 
 ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
-MAX_PAGINATION = getattr(settings, "MAX_PAGINATION")
-DEFAULT_PAGINATION = getattr(settings, "DEFAULT_PAGINATION")
+MAX_PAGINATION_SIZE = getattr(settings, "MAX_PAGINATION_SIZE")
+DEFAULT_PAGINATION_SIZE = getattr(settings, "DEFAULT_PAGINATION_SIZE")
+
+
+class CustomPagination(PageNumberPagination):
+    page_size = DEFAULT_PAGINATION_SIZE
+    page_size_query_param = 'size'
+    max_page_size = MAX_PAGINATION_SIZE
+    last_page_strings = []
 
 
 class ShareView(viewsets.GenericViewSet,
@@ -64,8 +70,7 @@ class BalanceView(viewsets.GenericViewSet,
                   mixins.ListModelMixin, ):
     queryset = Balance.objects.all()
     serializer_class = BalanceSerializer
-
-    # change status to 3
+    pagination_class = CustomPagination
 
     def perform_create(self, serializer, *args, **kwargs):
         """
@@ -196,84 +201,33 @@ class DashboardView(viewsets.GenericViewSet,
         return Response(response)
 
 
-class BlockView(viewsets.GenericViewSet):
-    pagination_class = PageNumberPagination
-    pagination_class.page_size = DEFAULT_PAGINATION
+class BlockView(viewsets.GenericViewSet,
+                mixins.ListModelMixin):
+    pagination_class = CustomPagination
 
     def get_queryset(self):
         """
-        Return response of address Explorer of ergo
-        This function get response and check data if a block mined by miner of in pool set flag 'inPool': True in json item
-        In this function set limit in number get block from explorer
-        :return:mined block
+        get remote and process it
+        :return:
         """
-        query = dict()
-        base = urljoin(ERGO_EXPLORER_ADDRESS, 'blocks')
-        # Create url for send to explorer and set limit for get blocks.
-        for param in self.request.query_params:
-            # Remove param page from request to Explorer
-            if param == 'page':
-                continue
-            value = self.request.query_params.get(param)
-            # limitation use for limited query on data_base with get limit block
-            if param == 'limit' and int(value) > MAX_PAGINATION:
-                value = MAX_PAGINATION
-            query[param] = value
-        # if in request not use limit set limitation policy pool
-        if 'limit' not in query:
-            query['limit'] = str(MAX_PAGINATION)
-        url_parts = list(urlparse(base))
-        base_query = dict(parse_qsl(url_parts[4]))
-        base_query.update(query)
-        url_parts[4] = urlencode(base_query)
-        url = urlunparse(url_parts)
 
-        try:
-            # Send request to Ergo_explorer for get blocks
-            response = requests.get(url).json()
-            logger.info("Get response from url {}".format(url))
-        except requests.exceptions.RequestException as e:
-            logger.error("Can not resolve response from explorer")
-            logger.error(e)
-            return {'status': 'error'}
-        heights = list()
-        for item in response['items']:
-            heights.append(item.get('height'))
-        # get shares that mined block in our pool and are in response of explorer
-        # and set flag 'inpool' on this block
-        shares = Share.objects.values('block_height').filter(Q(status='solved'), block_height__in=heights)
-        heights_share = list()
-        for share in shares:
-            heights_share.append(share['block_height'])
-        for item in response.get('items'):
-            if item.get('height') in heights_share:
-                item.update({"inPool": True})
-                logger.info("Set flag inPool true for height {}".format(item.get('height')))
-            else:
-                item.update({"inPool": False})
-        return response
+        return BlockDataIterable(self.request)
 
-    def list(self, request):
+    def list(self, request, *args, **kwargs):
+        """
+        return a paginated list of block elements
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
         queryset = self.get_queryset()
-        # set pagination on response
-        try:
-            page = self.paginate_queryset(queryset['items'])
-        except Exception as e:
-            logger.error("Pagination query set have bug.")
-            logger.error(e)
-            return Response({
-                "message": 'No more record.',
-                "data": {}
-            }, status=status.HTTP_404_NOT_FOUND)
+        if isinstance(queryset, dict):
+            return Response(queryset)
+        page = self.paginate_queryset(queryset)
         if page is not None:
-            response = {
-                'items': page,
-                'total': queryset['total']
-            }
-            return self.get_paginated_response(response)
-        logger.debug("Items is None")
-        return Response(
-            {"message": 'There isn\'t record', "data": {}}, status=status.HTTP_200_OK)
+            return self.get_paginated_response(page)
+        return Response(queryset[:])
 
 
 class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
