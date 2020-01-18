@@ -10,8 +10,12 @@ import sys
 import abc
 import logging
 import requests
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
+ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
+MAX_PAGINATION_SIZE = getattr(settings, "MAX_PAGINATION_SIZE")
+DEFAULT_PAGINATION_SIZE = getattr(settings, "DEFAULT_PAGINATION_SIZE")
 
 
 class RewardAlgorithm(metaclass=abc.ABCMeta):
@@ -244,3 +248,79 @@ def node_request(api, header=None, data=None, params=None, request_type="get"):
         logger.error(e)
         response = {'status': 'error', 'message': 'Can not resolve response from node'}
         raise Exception(response)
+
+
+class BlockDataIterable(object):
+
+    def __init__(self, request):
+        """
+        save remote queries
+        TODO we can change this api to call node blocks instead of interacting explorer
+        :param request:
+        """
+        queries = dict(request.GET)
+        page_index = int(request.GET.get("page", 1)) - 1
+        page_size = min(int(request.GET.get("size", DEFAULT_PAGINATION_SIZE)), MAX_PAGINATION_SIZE)
+        offset = page_size * page_index
+        limit = page_size
+        queries.pop("page", 0)
+        queries.pop("size", 0)
+        queries.update({"offset": offset, "limit": limit})
+        self.queries = queries
+        self._status = None
+        self._count = None
+        self._values = None
+
+    def load_remote_data(self):
+        """
+        load explorer data and store it in some cache variables
+        :return: noting
+        """
+        try:
+            url = urljoin(ERGO_EXPLORER_ADDRESS, 'blocks')
+            # Send request to Ergo_explorer for get blocks
+            response = requests.get(url, self.queries)
+            response = response.json()
+            logger.info("Get response from url {}".format(url))
+            self._values = response.get("items", [])
+            self._count = response.get("total", 0)
+            self._status = "success"
+            self.set_flags()
+        except requests.exceptions.RequestException as e:
+            logger.error("Can not resolve response from explorer")
+            logger.error(e)
+            self._status = "error"
+            self._count = 0
+            self._values = {"error": "can`t connect to explorer"}
+
+    def set_flags(self):
+        """
+        scan a list of blocks and set pool flag on them if mined with pool
+        :return: nothing
+        """
+        heights = [item.get("height") for item in self._values]
+        solved_heights = set(
+            Share.objects.values_list('block_height', flat=True).filter(Q(status='solved'), block_height__in=heights))
+        for item in self._values:
+            item['pool'] = item.get("height") in solved_heights
+
+    def __getitem__(self, item):
+        """
+        get a list of blocks data
+        :param item: not used because this class has only current page of data
+        :return:
+        """
+        if self._values is None:
+            # if cache is empty we must load remote data
+            self.load_remote_data()
+        return self._values
+
+    def __len__(self):
+        """
+        get total elements
+        :return:
+        """
+        if self._values is None:
+            # if cache is empty we must load remote data
+            self.load_remote_data()
+        return self._count
