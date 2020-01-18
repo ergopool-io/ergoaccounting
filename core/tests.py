@@ -446,11 +446,12 @@ class ConfigurationAPITest(TestCase):
         # retrieve all possible keys for KEY_CHOICES
         keys = [key for (key, temp) in CONFIGURATION_KEY_CHOICE]
         # define expected response as an empty list
-        expected_response = []
+        expected_response = dict(CONFIGURATION_DEFAULT_KEY_VALUE)
         # create a json like dictionary for any key in keys
         for key in keys:
             Configuration.objects.create(key=key, value='1')
-            expected_response.append({'key': key, 'value': '1'})
+            val_type = CONFIGURATION_KEY_TO_TYPE[key]
+            expected_response[key] = locate(val_type)('1')
         # send a http 'get' request to the configuration endpoint
         response = self.client.get('/conf/')
         # check the status of the response

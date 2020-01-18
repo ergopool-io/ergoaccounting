@@ -1,3 +1,5 @@
+from pydoc import locate
+
 from django.db.models import Q, Count, Sum, Max, Min
 from datetime import datetime, timedelta
 from rest_framework import filters
@@ -12,7 +14,7 @@ import requests
 import logging
 from django.conf import settings
 from core.utils import compute_hash_rate, RewardAlgorithm
-from core.models import Share, Miner, Balance, Configuration
+from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS, MAX_PAGINATION, DEFAULT_PAGINATION
 from core.tasks import generate_and_send_transaction
@@ -98,6 +100,13 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
         key = serializer.validated_data['key']
         value = serializer.validated_data['value']
         configurations = Configuration.objects.filter(key=key)
+        val_type = CONFIGURATION_KEY_TO_TYPE[key]
+        try:
+            locate(val_type)(value)
+
+        except:
+            return
+
         if not configurations:
             logger.info('Saving new configuration.')
             serializer.save()
@@ -106,6 +115,17 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
             configuration = Configuration.objects.get(key=key)
             configuration.value = value
             configuration.save()
+
+    def list(self, request, *args, **kwargs):
+        """
+        overrides list method to return list of key: value instead of list of dicts
+        """
+        config = dict(CONFIGURATION_DEFAULT_KEY_VALUE)
+        for conf in Configuration.objects.all():
+            val_type = CONFIGURATION_KEY_TO_TYPE[conf.key]
+            config[conf.key] = locate(val_type)(conf.value)
+
+        return Response(config, status=status.HTTP_200_OK)
 
 
 class DashboardView(viewsets.GenericViewSet,
