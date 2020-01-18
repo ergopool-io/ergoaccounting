@@ -6,4 +6,5 @@ requests>=2.22,<2.23
 celery>=4.0,<4.5
 django_celery_beat>=1.4.0,<1.4.1
 coverage==5.0.2
+frozendict==1.2
 
