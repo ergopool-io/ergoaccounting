@@ -97,8 +97,12 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         calculates real reward to share between shares of a round
         :return: real reward to be shared
         """
-        # TOTAL_REWARD - FEE
-        return Configuration.objects.TOTAL_REWARD - Configuration.objects.FEE
+        # total reward considering pool fee and reward factor
+        REWARD_FACTOR = Configuration.objects.REWARD_FACTOR
+        PRECISION = Configuration.objects.REWARD_FACTOR_PRECISION
+        TOTAL_REWARD = round((Configuration.objects.TOTAL_REWARD / 1e9) * REWARD_FACTOR, PRECISION)
+        TOTAL_REWARD = int(TOTAL_REWARD * 1e9)
+        return int(TOTAL_REWARD * (1 - Configuration.objects.FEE_FACTOR))
 
     def create_balance_from_share(self, shares, last_solved_share):
         """
