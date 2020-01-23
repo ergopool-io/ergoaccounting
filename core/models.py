@@ -34,32 +34,32 @@ CONFIGURATION_KEY_CHOICE = (
 )
 
 CONFIGURATION_KEY_TO_TYPE = frozendict({
-    "TOTAL_REWARD": "float",
-    "MAX_REWARD": "float",
+    "TOTAL_REWARD": "int",
+    "MAX_REWARD": "int",
     "PPLNS_N": "int",
-    "FEE": "float",
+    "FEE": "int",
     "PERIOD_TIME": "float",
     'REWARD_ALGORITHM': 'str',
-    'TRANSACTION_FEE': 'float',
+    'TRANSACTION_FEE': 'int',
     "MAX_NUMBER_OF_OUTPUTS": 'int',
-    "MAX_WITHDRAW_THRESHOLD": 'float',
-    "MIN_WITHDRAW_THRESHOLD": 'float',
-    "DEFAULT_WITHDRAW_THRESHOLD": 'float',
+    "MAX_WITHDRAW_THRESHOLD": 'int',
+    "MIN_WITHDRAW_THRESHOLD": 'int',
+    "DEFAULT_WITHDRAW_THRESHOLD": 'int',
     "CONFIRMATION_LENGTH": 'int'
 })
 
 CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
-    'TOTAL_REWARD': 65,
-    'MAX_REWARD': 35,
+    'TOTAL_REWARD': int(65e9),
+    'MAX_REWARD': int(35e9),
     'PPLNS_N': 5,
-    'FEE': 0.0,
+    'FEE': 0,
     'PERIOD_TIME': 24 * 60 * 60,
     'REWARD_ALGORITHM': 'Prop',
-    'TRANSACTION_FEE': 0.001,
+    'TRANSACTION_FEE': 1000000,
     "MAX_NUMBER_OF_OUTPUTS": 5,
-    "MAX_WITHDRAW_THRESHOLD": 100,
-    "MIN_WITHDRAW_THRESHOLD": 1,
-    "DEFAULT_WITHDRAW_THRESHOLD": 100,
+    "MAX_WITHDRAW_THRESHOLD": int(100e9),
+    "MIN_WITHDRAW_THRESHOLD": int(1e9),
+    "DEFAULT_WITHDRAW_THRESHOLD": int(100e9),
     "CONFIRMATION_LENGTH": 720
 })
 
@@ -67,7 +67,7 @@ CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
 class Miner(models.Model):
     nick_name = models.CharField(max_length=255, blank=True)
     public_key = models.CharField(max_length=256, unique=True)
-    periodic_withdrawal_amount = models.FloatField(null=True)
+    periodic_withdrawal_amount = models.BigIntegerField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -106,7 +106,7 @@ class Balance(models.Model):
 
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     share = models.ForeignKey(Share, on_delete=models.CASCADE, null=True)
-    balance = models.FloatField(default=0)
+    balance = models.BigIntegerField(default=0)
     status = models.IntegerField(blank=False, choices=STATUS_CHOICE, default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
