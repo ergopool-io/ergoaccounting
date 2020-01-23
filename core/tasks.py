@@ -46,13 +46,13 @@ def periodic_withdrawal():
         balance = pk_to_total_balance.get(miner.public_key)
         if balance >= threshold:
             # above threshold (whether default one or the one specified by the miner)
-            outputs.append((miner.public_key, int(balance * 1e9)))
+            outputs.append((miner.public_key, balance))
 
     # call the approprate function for withdrawal
     try:
         logger.info('Periodic withdrawal for #{} miners'.format(len(outputs)))
         # Creating balance object with pending_withdrawal status
-        objects = [Balance(miner=pk_to_miner.get(pk), status=4, balance=-balance/1e9) for pk, balance in outputs]
+        objects = [Balance(miner=pk_to_miner.get(pk), status=4, balance=-balance) for pk, balance in outputs]
         Balance.objects.bulk_create(objects)
         outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
         generate_and_send_transaction(outputs)
@@ -90,7 +90,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
         return
 
     MAX_NUMBER_OF_OUTPUTS = Configuration.objects.MAX_NUMBER_OF_OUTPUTS
-    TRANSACTION_FEE = int(Configuration.objects.TRANSACTION_FEE * 1e9)
+    TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
 
     # getting all unspent boxes
     res = node_request('wallet/boxes/unspent')
@@ -126,7 +126,6 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
             logger.debug(box['box']['value'])
             to_use_box_ind += 1
 
-        logger.critical(to_use_boxes_value_sum / 1e9)
         if to_use_boxes_value_sum < needed_erg:
             logger.critical('Not enough boxes for withdrawal!')
             remove_pending_balances(outputs[chuck_start:])
@@ -144,7 +143,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
         # create balances with status pending_withdrawal
         remove_pending_balances(chunk)
         balances = [Balance(miner=pk_to_miner[pk],
-                            balance=-value/1e9, status=3) for pk, value, _ in chunk]
+                            balance=-value, status=3) for pk, value, _ in chunk]
         Balance.objects.bulk_create(balances)
 
         res = node_request('wallet/transaction/send', data=data, request_type='post')

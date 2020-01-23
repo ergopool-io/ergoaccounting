@@ -124,7 +124,7 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
                 balances.append(Balance(
                     miner_id=miner_id,
                     share=last_solved_share,
-                    balance=min(MAX_REWARD, REWARD * (share_count / total_number_of_shares)))
+                    balance=min(MAX_REWARD, int(REWARD * (share_count / total_number_of_shares))))
                 )
 
             # create and save balances to database
