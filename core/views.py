@@ -249,7 +249,7 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
 
         requested_amount = request.data.get('withdraw_amount')
         try:
-            requested_amount = float(requested_amount)
+            requested_amount = int(requested_amount)
             if requested_amount <= 0:
                 raise Exception()
 
@@ -265,7 +265,7 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
 
         # creating a pending_withdrawal status
         balance = Balance.objects.create(miner=miner, balance=-requested_amount, status=4)
-        generate_and_send_transaction.delay([(miner.public_key, int(requested_amount * 1e9), balance.pk)],
+        generate_and_send_transaction.delay([(miner.public_key, requested_amount, balance.pk)],
                                             subtract_fee=True)
         return Response({'message': 'withdrawal was successful.',
                          'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
