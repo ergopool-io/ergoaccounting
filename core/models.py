@@ -10,11 +10,15 @@ logger = logging.getLogger(__name__)
 CONFIGURATION_KEY_CHOICE = (
     # total reward of a round
     ("TOTAL_REWARD", "TOTAL_REWARD"),
+    # total_reward factor
+    ("REWARD_FACTOR", "REWARD_FACTOR"),
+    # pool fee factor
+    ("FEE_FACTOR", "FEE_FACTOR"),
+    # pool reward factor result precision
+    ("REWARD_FACTOR_PRECISION", "REWARD_FACTOR_PRECISION"),
     # maximum reward anyone can receive in reward sharing
     ("MAX_REWARD", "MAX_REWARD"),
     ("PPLNS_N", "PPLNS_N"),
-    # pool fee which will be subtracted form reward before sharing
-    ("FEE", "POOL_FEE"),
     # period time of hash rate
     ("PERIOD_TIME", "HASH_PERIOD_TIME"),
     # reward algorithm used for sharing reward
@@ -35,9 +39,11 @@ CONFIGURATION_KEY_CHOICE = (
 
 CONFIGURATION_KEY_TO_TYPE = frozendict({
     "TOTAL_REWARD": "int",
+    "REWARD_FACTOR": "float",
+    "FEE_FACTOR": "float",
+    "REWARD_FACTOR_PRECISION": "int",
     "MAX_REWARD": "int",
     "PPLNS_N": "int",
-    "FEE": "int",
     "PERIOD_TIME": "float",
     'REWARD_ALGORITHM': 'str',
     'TRANSACTION_FEE': 'int',
@@ -49,10 +55,12 @@ CONFIGURATION_KEY_TO_TYPE = frozendict({
 })
 
 CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
-    'TOTAL_REWARD': int(65e9),
+    'TOTAL_REWARD': int(67.5e9),
+    "REWARD_FACTOR": 0.96296297,
+    'FEE_FACTOR': 0,
+    "REWARD_FACTOR_PRECISION": 2,
     'MAX_REWARD': int(35e9),
     'PPLNS_N': 5,
-    'FEE': 0,
     'PERIOD_TIME': 24 * 60 * 60,
     'REWARD_ALGORITHM': 'Prop',
     'TRANSACTION_FEE': 1000000,

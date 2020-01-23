@@ -138,6 +138,9 @@ class PropFunctionTest(TestCase):
         :return:
         """
         Configuration.objects.create(key='REWARD_ALGORITHM', value='Prop')
+        Configuration.objects.create(key='TOTAL_REWARD', value=str(int(67.5e9)))
+        Configuration.objects.create(key='FEE_FACTOR', value='0')
+        Configuration.objects.create(key='REWARD_FACTOR', value=str(65 / 67.5))
         # create miners lists
         miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
         # create shares list
@@ -226,7 +229,8 @@ class PropFunctionTest(TestCase):
 
         :return:
         """
-        Configuration.objects.create(key='FEE', value=str(int(10e9)))
+        reward = RewardAlgorithm.get_instance().get_reward_to_share()
+        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
         share = self.shares[14]
         self.prop(share)
         balances = self.get_share_balance(share)
@@ -238,7 +242,8 @@ class PropFunctionTest(TestCase):
         in this case we have 9 valid share 9 invalid share and one solved share.
         :return:
         """
-        Configuration.objects.create(key='FEE', value=str(int(10e9)))
+        reward = RewardAlgorithm.get_instance().get_reward_to_share()
+        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
         share = self.shares[34]
         self.prop(share)
         balances = self.get_share_balance(share)
@@ -250,11 +255,12 @@ class PropFunctionTest(TestCase):
         in this case we only have one share and reward must be minimum of MAX_REWARD and TOTAL_REWARD
         :return:
         """
-        Configuration.objects.create(key='FEE', value=str(int(10e9)))
+        reward = RewardAlgorithm.get_instance().get_reward_to_share()
+        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
         share = self.shares[35]
         self.prop(share)
         balances = self.get_share_balance(share)
-        reward_value = min(Configuration.objects.MAX_REWARD, Configuration.objects.TOTAL_REWARD - Configuration.objects.FEE)
+        reward_value = min(Configuration.objects.MAX_REWARD, Configuration.objects.TOTAL_REWARD - Configuration.objects.FEE_FACTOR)
         self.assertEqual(balances, {'2': reward_value})
 
     def test_prop_called_multiple_with_fee(self):
@@ -262,7 +268,8 @@ class PropFunctionTest(TestCase):
         in this case we call prop function 5 times. after each call balance for each miner must be same as expected
         :return:
         """
-        Configuration.objects.create(key='FEE', value=str(int(10e9)))
+        reward = RewardAlgorithm.get_instance().get_reward_to_share()
+        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
         share = self.shares[34]
         for i in range(5):
             self.prop(share)
@@ -573,6 +580,9 @@ class PPLNSFunctionTest(TestCase):
         :return:
         """
         Configuration.objects.create(key='REWARD_ALGORITHM', value='PPLNS')
+        Configuration.objects.create(key='TOTAL_REWARD', value=str(int(67.5e9)))
+        Configuration.objects.create(key='FEE_FACTOR', value='0')
+        Configuration.objects.create(key='REWARD_FACTOR', value=str(65 / 67.5))
         self.PPLNS = RewardAlgorithm.get_instance().perform_logic
         # create miners lists
         miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
@@ -644,7 +654,8 @@ class PPLNSFunctionTest(TestCase):
         :return:
         """
         share = self.shares[14]
-        Configuration.objects.create(key='FEE', value=str(int(10e9)))
+        reward = RewardAlgorithm.get_instance().get_reward_to_share()
+        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
         self.PPLNS(share)
         balances = self.get_share_balance(share)
         self.assertEqual(balances, {'0': int(20.625e9), '1': int(20.625e9), '2': int(13.75e9)})
@@ -656,7 +667,8 @@ class PPLNSFunctionTest(TestCase):
         :return:
         """
         share = self.shares[44]
-        Configuration.objects.create(key='FEE', value=str(int(10e9)))
+        reward = RewardAlgorithm.get_instance().get_reward_to_share()
+        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
         self.PPLNS(share)
         balances = self.get_share_balance(share)
         self.assertEqual(balances, {'0': int(16.5e9), '1': int(22.0e9), '2': int(16.5e9)})
@@ -667,7 +679,8 @@ class PPLNSFunctionTest(TestCase):
         :return:
         """
         share = self.shares[44]
-        Configuration.objects.create(key='FEE', value=str(int(10e9)))
+        reward = RewardAlgorithm.get_instance().get_reward_to_share()
+        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
         for i in range(5):
             self.PPLNS(share)
             balances = self.get_share_balance(share)
