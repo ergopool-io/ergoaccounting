@@ -104,6 +104,13 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         TOTAL_REWARD = int(TOTAL_REWARD * 1e9)
         return int(TOTAL_REWARD * (1 - Configuration.objects.FEE_FACTOR))
 
+    def get_miner_shares(self, shares):
+        """
+        :param shares: share objects to be considered in calculating miners' share (as in money share not Share object)
+        :return: list of tuples (miner, share)
+        """
+        return shares.values_list('miner').annotate(Sum('difficulty'))
+
     def create_balance_from_share(self, shares, last_solved_share):
         """
         This method shares the reward between shares of each miner
@@ -116,9 +123,12 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         # total reward per solved block, i.e, TOTAL_REWARD - FEE
         REWARD = self.get_reward_to_share()
         # total number of valid shares in this block mining round
-        total_number_of_shares = shares.count()
+        # total_number_of_shares = shares.count()
         # a list of (miner's primary key, miner's valid shares) for this block mining round
-        miners_share_count = shares.values_list('miner').annotate(Count('miner'))
+        # miners_share_count = shares.values_list('miner').annotate(Count('difficulty'))
+        miners_share_count = self.get_miner_shares(shares)
+        total_number_of_shares = sum(share for _, share in miners_share_count)
+
 
         with transaction.atomic():
             # define "balances" as a list to create and save balance objects
