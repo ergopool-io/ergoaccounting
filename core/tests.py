@@ -276,6 +276,43 @@ class PropFunctionTest(TestCase):
             balances = self.get_share_balance(share)
             self.assertEqual(balances, {'0': int(16.5e9), '1': int(22.0e9), '2': int(16.5e9)})
 
+    def test_prop_with_first_solved_share_different_difficulty(self):
+        """
+        same scenario as first_solved_share but with different difficulties
+        """
+        share = self.shares[14]
+        miner = Miner.objects.get(public_key='0')
+        Share.objects.filter(miner=miner).delete()
+        others_difficulty = Share.objects.filter(created_at__lte=share.created_at, miner__public_key__in=['1', '2'], status__in=['solved', 'valid'])\
+            .aggregate(Sum('difficulty'))
+        others_difficulty = others_difficulty['difficulty__sum']
+        cur = Share.objects.create(miner=miner, status='valid', difficulty=others_difficulty)
+        cur.created_at = share.created_at - timedelta(seconds=1)
+        cur.save()
+
+        self.prop(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': int(65e9 / 2), '1': int(13.0e9), '2': int(19.5e9)})
+
+    def test_prop_between_two_solved_shares_different_difficulty(self):
+        """
+        same scenario as between_two_solved_shares but with different difficulties
+        """
+        Configuration.objects.create(key='MAX_REWARD', value=int(65e9))
+        share = self.shares[34]
+        miner = Miner.objects.get(public_key='1')
+        Share.objects.filter(miner=miner).update(difficulty=0)
+        others_difficulty = Share.objects.filter(created_at__lte=share.created_at, created_at__gt=self.shares[14].created_at, miner__public_key__in=['0', '2'], status__in=['solved', 'valid']) \
+            .aggregate(Sum('difficulty'))
+        others_difficulty = others_difficulty['difficulty__sum']
+        cur = Share.objects.create(miner=miner, status='valid', difficulty=others_difficulty * 2)
+        cur.created_at = share.created_at - timedelta(seconds=1)
+        cur.save()
+        self.prop(share)
+        balances = self.get_share_balance(share)
+        val = 65. / 3
+        self.assertEqual(balances, {'0': int(val * 0.5e9), '1': int(val * 2e9), '2': int(val * 0.5e9)})
+
     def tearDown(self):
         """
         tearDown function to delete miners created in setUp function
@@ -685,6 +722,26 @@ class PPLNSFunctionTest(TestCase):
             self.PPLNS(share)
             balances = self.get_share_balance(share)
             self.assertEqual(balances, {'0': int(16.5e9), '1': int(22.0e9), '2': int(16.5e9)})
+
+    def test_pplns_with_lower_amount_of_shares_different_difficulty(self):
+        """
+        same scenario as with_lower_amount_of_shares but with different difficulties
+        :return:
+        """
+        share = self.shares[14]
+        miner = Miner.objects.get(public_key='2')
+        Share.objects.filter(miner=miner).delete()
+        others_difficulty = Share.objects.filter(created_at__lte=share.created_at, miner__public_key__in=['0', '1'], status__in=['solved', 'valid']) \
+            .aggregate(Sum('difficulty'))
+        others_difficulty = others_difficulty['difficulty__sum']
+        cur = Share.objects.create(miner=miner, status='valid', difficulty=others_difficulty)
+        cur.created_at = share.created_at - timedelta(seconds=1)
+        cur.save()
+
+        self.PPLNS(share)
+        balances = self.get_share_balance(share)
+        val = 65. / 4
+        self.assertEqual(balances, {'0': int(val * 1e9), '1': int(val * 1e9), '2': int(val * 2e9)})
 
     def tearDown(self):
         """
