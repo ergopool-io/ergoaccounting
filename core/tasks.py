@@ -1,10 +1,16 @@
 import logging
+import os
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import urljoin
 
-from django.db.models import Q
+from django.conf import settings
+from django.db import transaction
+from django.db.models import Q, Sum, Count
 
 from ErgoAccounting.celery import app
-from core.models import Miner, Balance, Configuration, Share
+from core.models import Miner, Balance, Configuration, Share, AggregateShare
+from core.serializers import BalanceSerializer, ShareSerializer, AggregateShareSerializer
 from core.utils import node_request
 
 logger = logging.getLogger(__name__)
@@ -195,3 +201,121 @@ def immature_to_mature():
         Balance.objects.filter(q).update(status=2)
 
 
+@app.task
+def aggregate():
+    """
+    aggregates balances and shares
+    shares before some round specified in settings will be aggregated
+    aggregated shares before some round specified in settings will be deleted
+    balances before some round specified in settings will be aggregated
+    all deleted shares, balances and aggregated shares will be saved in their respective files
+    """
+    # create necessary folders if not exist
+    for file in [settings.BALANCE_DETAIL_FOLDER, settings.SHARE_DETAIL_FOLDER, settings.SHARE_AGGREGATE_FOLDER]:
+        Path(os.path.join(settings.AGGREGATE_ROOT_FOLDER, file)).mkdir(parents=True, exist_ok=True)
+
+    date = str(datetime.now())
+    shares_detail_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
+                                      settings.SHARE_DETAIL_FOLDER, date) + '.json'
+    shares_aggregate_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
+                                         settings.SHARE_AGGREGATE_FOLDER, date) + '.json'
+    balance_detail_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
+                                       settings.BALANCE_DETAIL_FOLDER, date) + '.json'
+    solved = Share.objects.filter(status='solved').order_by('-created_at')
+    if solved.count() > settings.KEEP_BALANCE_WITH_DETAIL_NUM:
+        balance_solved_share = solved[settings.KEEP_BALANCE_WITH_DETAIL_NUM]
+        bal_mature_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at, status=2) \
+            .values('miner').annotate(balance=Sum('balance'), num=Count('id'))
+        bal_withdraw_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at, status=3) \
+            .values('miner').annotate(balance=Sum('balance'), num=Count('id'))
+
+        new_balances = [Balance(miner_id=bal['miner'], balance=bal['balance'], status=2)
+                        for bal in bal_mature_aggregation]
+        new_balances += [Balance(miner_id=bal['miner'], balance=bal['balance'], status=3)
+                         for bal in bal_withdraw_aggregation]
+
+        # removing previous balances and creating new aggregated ones
+        with transaction.atomic():
+            to_delete_balances = Balance.objects.filter(created_at__lte=balance_solved_share.created_at,
+                                                        status__in=[2, 3])
+            details = [str(BalanceSerializer(balance).data) for balance in to_delete_balances]
+            to_delete_balances.delete()
+            Balance.objects.filter(created_at__lte=balance_solved_share.created_at,
+                                   status__in=[2, 3]).delete()
+            Balance.objects.bulk_create(new_balances)
+
+            if len(details) > 0:
+                with open(balance_detail_file, 'a') as file:
+                    file.write('\n'.join(details) + '\n')
+
+        # nothing to do
+        if solved.count() <= settings.KEEP_SHARES_WITH_DETAIL_NUM:
+            return
+
+        # aggregating shares
+        statuses = ['valid', 'invalid', 'repetitious']
+        with transaction.atomic():
+            aggregated_shares = []
+            last_share = solved[settings.KEEP_SHARES_WITH_DETAIL_NUM]
+            to_be_aggregated = solved.filter(created_at__lte=last_share.created_at,
+                                             is_aggregated=False)
+
+            # nothing to do
+            if to_be_aggregated.count() == 0:
+                return
+
+            will_be_aggregated = Share.objects.filter(created_at__lte=to_be_aggregated.first().created_at,
+                                                      status__in=statuses)
+            details = [str(ShareSerializer(share).data) for share in will_be_aggregated]
+            for ind, share in enumerate(to_be_aggregated):
+                miner_to_shares = dict()
+                for status in statuses:
+                    shares = Share.objects.filter(created_at__lte=share.created_at, status=status) \
+                        .values('miner').annotate(count=Count('status'), difficulty=Sum('difficulty'))
+                    if ind + 1 < to_be_aggregated.count():
+                        nxt_share = to_be_aggregated[ind + 1]
+                        shares = Share.objects.filter(created_at__lte=share.created_at,
+                                                      created_at__gte=nxt_share.created_at, status=status) \
+                            .values('miner').annotate(count=Count('status'), difficulty=Sum('difficulty'))
+
+                    for cur_share in shares:
+                        pk = cur_share['miner']
+                        if pk not in miner_to_shares:
+                            miner_to_shares[pk] = {'valid': 0, 'invalid': 0,
+                                                   'repetitious': 0, 'difficulty_sum': 0}
+
+                        miner_to_shares[pk][status] = cur_share['count']
+                        miner_to_shares[pk]['difficulty_sum'] += cur_share['difficulty']
+
+                aggregated_shares += [
+                    AggregateShare(miner_id=pk, valid_num=val['valid'], invalid_num=val['invalid'],
+                                   repetitious_num=val['repetitious'], difficulty_sum=val['difficulty_sum'],
+                                   solved_share=share)
+                    for pk, val in miner_to_shares.items()
+                ]
+
+            # create aggregate objects
+            AggregateShare.objects.bulk_create(aggregated_shares)
+
+            # remove detail objects
+            Share.objects.filter(created_at__lte=to_be_aggregated.first().created_at, status__in=statuses).delete()
+
+            # update solved shares to aggregate
+            to_be_aggregated.update(is_aggregated=True)
+
+            # writing details to file
+            if len(details) > 0:
+                with open(shares_detail_file, 'a') as file:
+                    file.write('\n'.join(details) + '\n')
+
+        # removing old aggregated shares
+        if solved.count() > settings.KEEP_SHARES_WITH_DETAIL_NUM + settings.KEEP_SHARES_AGGREGATION_NUM:
+            last_share = solved[settings.KEEP_SHARES_WITH_DETAIL_NUM + settings.KEEP_SHARES_AGGREGATION_NUM]
+            to_be_deleted = AggregateShare.objects.filter(solved_share__created_at__lte=last_share.created_at)
+
+            aggregated = [str(AggregateShareSerializer(aggregateShare).data) for aggregateShare in to_be_deleted]
+            to_be_deleted.delete()
+            # writing aggregated shares to file
+            if len(aggregated) > 0:
+                with open(shares_aggregate_file, 'a') as file:
+                    file.write('\n'.join(aggregated) + '\n')
