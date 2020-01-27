@@ -86,11 +86,23 @@ app.conf.beat_schedule = {
         'schedule': int(os.environ.get('PERIODIC_WITHDRAWAL_INTERVAL', 24 * 3600)),
         'args': ()
     },
-
     'periodic_immature_to_mature': {
         'task': 'core.tasks.immature_to_mature',
         'schedule': int(os.environ.get('PERIODIC_IMMATURE_TO_MATURE_INTERVAL', 24 * 3600)),
         'args': ()
     },
+    'periodic_aggregate': {
+        'task': 'core.tasks.aggregate',
+        'schedule': int(os.environ.get('PERIODIC_AGGREGATE_INTERVAL', 24 * 3600)),
+        'args': ()
+    },
 }
 
+# aggregate parameters
+KEEP_SHARES_WITH_DETAIL_NUM = 10
+KEEP_SHARES_AGGREGATION_NUM = 710
+KEEP_BALANCE_WITH_DETAIL_NUM = 720
+AGGREGATE_ROOT_FOLDER = 'aggregation'
+SHARE_DETAIL_FOLDER = 'shares_detail'
+SHARE_AGGREGATE_FOLDER = 'shares_aggregate'
+BALANCE_DETAIL_FOLDER = 'balance_detail'
