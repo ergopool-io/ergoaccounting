@@ -97,6 +97,7 @@ class Share(models.Model):
     transaction_id = models.CharField(max_length=80, blank=True, null=True)
     difficulty = models.BigIntegerField(blank=False)
     block_height = models.BigIntegerField(blank=True, null=True)
+    is_aggregated = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -119,9 +120,24 @@ class Balance(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['created_at']),
+        ]
+
     def __str__(self):
         return '{}-{}'.format(str(self.miner), self.balance)
 
+
+class AggregateShare(models.Model):
+    solved_share = models.ForeignKey(Share, on_delete=models.CASCADE)
+    miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
+    valid_num = models.PositiveIntegerField()
+    invalid_num = models.PositiveIntegerField()
+    repetitious_num = models.PositiveIntegerField()
+    difficulty_sum = models.BigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    
 
 class ConfigurationManager(models.Manager):
 
