@@ -1,28 +1,24 @@
 import json
+import os
 import random
 import string
 import uuid
-from django.test import TestCase, Client, TransactionTestCase
-from mock import patch, call
-from .views import *
-from urllib.parse import urljoin
-from datetime import datetime, timedelta
-from django.utils import timezone
-import json
+from datetime import timedelta, datetime
 from pydoc import locate
-from urllib.parse import urljoin
+from urllib.parse import urlparse, urljoin
 
-from django.test import TestCase, Client, TransactionTestCase
+from django.db.models import Sum, Max
+from django.test import TestCase, Client, TransactionTestCase, override_settings
 from django.utils import timezone
 from mock import patch, call
+from rest_framework import status
+from django.conf import settings
 
-from ErgoAccounting.settings import ERGO_EXPLORER_ADDRESS
-from core.tasks import periodic_withdrawal, generate_and_send_transaction, immature_to_mature
-from core.models import Miner, Share, Configuration, CONFIGURATION_KEY_CHOICE, CONFIGURATION_KEY_TO_TYPE, Balance, \
-    CONFIGURATION_DEFAULT_KEY_VALUE
-from core.tasks import periodic_withdrawal, generate_and_send_transaction
+from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
+    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE
+from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
+from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction
 from core.utils import RewardAlgorithm, compute_hash_rate
-from .views import *
 
 
 def random_string(length=10):
@@ -260,7 +256,8 @@ class PropFunctionTest(TestCase):
         share = self.shares[35]
         self.prop(share)
         balances = self.get_share_balance(share)
-        reward_value = min(Configuration.objects.MAX_REWARD, Configuration.objects.TOTAL_REWARD - Configuration.objects.FEE_FACTOR)
+        reward_value = min(Configuration.objects.MAX_REWARD,
+                           Configuration.objects.TOTAL_REWARD - Configuration.objects.FEE_FACTOR)
         self.assertEqual(balances, {'2': reward_value})
 
     def test_prop_called_multiple_with_fee(self):
@@ -283,7 +280,8 @@ class PropFunctionTest(TestCase):
         share = self.shares[14]
         miner = Miner.objects.get(public_key='0')
         Share.objects.filter(miner=miner).delete()
-        others_difficulty = Share.objects.filter(created_at__lte=share.created_at, miner__public_key__in=['1', '2'], status__in=['solved', 'valid'])\
+        others_difficulty = Share.objects.filter(created_at__lte=share.created_at, miner__public_key__in=['1', '2'],
+                                                 status__in=['solved', 'valid']) \
             .aggregate(Sum('difficulty'))
         others_difficulty = others_difficulty['difficulty__sum']
         cur = Share.objects.create(miner=miner, status='valid', difficulty=others_difficulty)
@@ -302,7 +300,9 @@ class PropFunctionTest(TestCase):
         share = self.shares[34]
         miner = Miner.objects.get(public_key='1')
         Share.objects.filter(miner=miner).update(difficulty=0)
-        others_difficulty = Share.objects.filter(created_at__lte=share.created_at, created_at__gt=self.shares[14].created_at, miner__public_key__in=['0', '2'], status__in=['solved', 'valid']) \
+        others_difficulty = Share.objects.filter(created_at__lte=share.created_at,
+                                                 created_at__gt=self.shares[14].created_at,
+                                                 miner__public_key__in=['0', '2'], status__in=['solved', 'valid']) \
             .aggregate(Sum('difficulty'))
         others_difficulty = others_difficulty['difficulty__sum']
         cur = Share.objects.create(miner=miner, status='valid', difficulty=others_difficulty * 2)
@@ -629,7 +629,7 @@ class PPLNSFunctionTest(TestCase):
             miner=miners[int(i / 2) % 3],
             status="solved" if i in [14, 44, 45] else "valid" if i % 2 == 0 else "invalid",
             difficulty=1000
-        )for i in range(46)]
+        ) for i in range(46)]
         # set create date for each shares to make them a sequence valid
         start_date = timezone.now() + timedelta(seconds=-100)
         for share in shares:
@@ -731,7 +731,8 @@ class PPLNSFunctionTest(TestCase):
         share = self.shares[14]
         miner = Miner.objects.get(public_key='2')
         Share.objects.filter(miner=miner).delete()
-        others_difficulty = Share.objects.filter(created_at__lte=share.created_at, miner__public_key__in=['0', '1'], status__in=['solved', 'valid']) \
+        others_difficulty = Share.objects.filter(created_at__lte=share.created_at, miner__public_key__in=['0', '1'],
+                                                 status__in=['solved', 'valid']) \
             .aggregate(Sum('difficulty'))
         others_difficulty = others_difficulty['difficulty__sum']
         cur = Share.objects.create(miner=miner, status='valid', difficulty=others_difficulty)
@@ -775,9 +776,11 @@ class ComputeHashRateTest(TransactionTestCase):
         """
         # Create objects for test
 
-        Miner.objects.create(nick_name="moein", public_key="12345678976543", created_at=datetime(2019, 12, 22, 8, 33, 45, 395985),
+        Miner.objects.create(nick_name="moein", public_key="12345678976543",
+                             created_at=datetime(2019, 12, 22, 8, 33, 45, 395985),
                              updated_at=datetime(2019, 12, 22, 8, 33, 45, 395985))
-        Miner.objects.create(nick_name="amir", public_key="869675768342", created_at=datetime(2019, 12, 23, 8, 33, 45, 395985),
+        Miner.objects.create(nick_name="amir", public_key="869675768342",
+                             created_at=datetime(2019, 12, 23, 8, 33, 45, 395985),
                              updated_at=datetime(2019, 12, 23, 8, 33, 45, 395985))
         share = Share.objects.create(share="12345", miner_id=1, block_height=23456,
                                      transaction_id="234567uhgt678", status="solved", difficulty=4253524523)
@@ -975,7 +978,8 @@ class TransactionGenerateTestCase(TestCase):
 
         # create output for each miner
         self.outputs = [(pk, int((i + 1) * 1e10)) for i, pk in enumerate(pks)]
-        self.pending_balances = [Balance(miner=Miner.objects.get(public_key=x[0]), balance=-x[1], status=4) for x in self.outputs]
+        self.pending_balances = [Balance(miner=Miner.objects.get(public_key=x[0]), balance=-x[1], status=4) for x in
+                                 self.outputs]
 
     def test_generate_three_transactions_max_num_output_4(self, mocked_request):
         """
@@ -1141,7 +1145,7 @@ class TransactionGenerateTestCase(TestCase):
 
         for pk, balance in self.outputs:
             miner = Miner.objects.get(public_key=pk)
-            Balance.objects.create(miner=miner, balance=-balance/1e10, status=4)
+            Balance.objects.create(miner=miner, balance=-balance / 1e10, status=4)
 
         TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
         generate_and_send_transaction(outputs)
@@ -1177,7 +1181,7 @@ class TransactionGenerateTestCase(TestCase):
 
         for pk, balance in self.outputs[0:4]:
             miner = Miner.objects.get(public_key=pk)
-            Balance.objects.create(miner=miner, balance=-balance/1e10, status=4)
+            Balance.objects.create(miner=miner, balance=-balance / 1e10, status=4)
 
         Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='20')
         TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
@@ -1561,7 +1565,8 @@ class MinerViewTestCase(TestCase):
         res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        mocked_generate_and_send_txs.delay.assert_has_calls([call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
+        mocked_generate_and_send_txs.delay.assert_has_calls(
+            [call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
 
         self.assertEqual(Balance.objects.filter(status=4, miner=miner, balance=int(-60e9)).count(), 1)
         self.assertEqual(Balance.objects.filter(status=4).count(), 1)
@@ -1580,7 +1585,8 @@ class MinerViewTestCase(TestCase):
         res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        mocked_generate_and_send_txs.delay.assert_has_calls([call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
+        mocked_generate_and_send_txs.delay.assert_has_calls(
+            [call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
 
         self.assertEqual(Balance.objects.filter(status=4, miner=miner, balance=int(-60e9)).count(), 1)
         self.assertEqual(Balance.objects.filter(status=4).count(), 2)
@@ -1598,7 +1604,8 @@ class MinerViewTestCase(TestCase):
         res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        mocked_generate_and_send_txs.delay.assert_has_calls([call([(miner.public_key, int(80e9), max_id)], subtract_fee=True)])
+        mocked_generate_and_send_txs.delay.assert_has_calls(
+            [call([(miner.public_key, int(80e9), max_id)], subtract_fee=True)])
         self.assertEqual(Balance.objects.filter(status=4, miner=miner, balance=int(-80e9)).count(), 1)
         self.assertEqual(Balance.objects.filter(status=4).count(), 1)
 
@@ -1823,3 +1830,569 @@ class ImmatureToMatureTestCase(TestCase):
         Miner.objects.all().delete()
         Share.objects.all().delete()
         Balance.objects.all().delete()
+
+
+
+@override_settings(KEEP_BALANCE_WITH_DETAIL_NUM=8)
+@override_settings(KEEP_SHARES_WITH_DETAIL_NUM=5)
+@override_settings(KEEP_SHARES_AGGREGATION_NUM=3)
+@override_settings(AGGREGATE_ROOT_FOLDER='/tmp')
+@patch('core.tasks.datetime')
+class AggregateTestCase(TestCase):
+    """
+    Test class for aggregation
+    """
+
+    def setUp(self):
+        """
+        creating 5 miners
+        2 solved share for each
+        for each status, 'valid', 'invalid' and 'repetitious create 8 shares
+        for each solved share and each miner create 2 balance,
+        one with status mature and one with withdrawal
+        """
+        date = '2020-01-27 12:19:46.196633'
+        self.shares_detail_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
+                                               settings.SHARE_DETAIL_FOLDER, date) + '.json'
+        self.shares_aggregate_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
+                                                  settings.SHARE_AGGREGATE_FOLDER, date) + '.json'
+        self.balance_detail_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
+                                                settings.BALANCE_DETAIL_FOLDER, date) + '.json'
+
+        # deleting files
+        for file in [self.shares_aggregate_file, self.shares_detail_file, self.balance_detail_file]:
+            if os.path.exists(file):
+                os.remove(file)
+
+        num_miners = 5
+        for i in range(num_miners):
+            Miner.objects.create(public_key=str(i))
+
+        self.solved = []
+        time = timezone.now()
+        for i in range(10):
+            solved_share = Share.objects.create(share=random_string(), miner=Miner.objects.all()[i % num_miners],
+                                                difficulty=int((i + 1) * 1e8),
+                                                status='solved')
+            Share.objects.filter(id=solved_share.id).update(created_at=time - timedelta(seconds=i * 10))
+            solved_share = Share.objects.get(id=solved_share.id)
+            self.solved.insert(0, solved_share)
+
+            for j in range(8):
+                for stat in ['invalid', 'valid', 'repetitious']:
+                    share = Share.objects.create(share=random_string(), miner=Miner.objects.all()[j % num_miners],
+                                                 difficulty=10, status=stat)
+                    Share.objects.filter(id=share.id).update(created_at=time - timedelta(seconds=i * 10 + 1))
+
+            for m in Miner.objects.all():
+                b = Balance.objects.create(miner=m, share=solved_share, balance=int(30e9), status=2)
+                Balance.objects.filter(id=b.id).update(created_at=solved_share.created_at - timedelta(seconds=1))
+                b = Balance.objects.create(miner=m, share=solved_share, balance=int(-10e9), status=3)
+                Balance.objects.filter(id=b.id).update(created_at=solved_share.created_at - timedelta(seconds=1))
+
+    def test_share_all_with_detail(self, mocked_time):
+        """
+        first time running the aggregate function
+        all shares and balances are present
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        share_detail_content = []
+
+        for solved in self.solved[:-settings.KEEP_SHARES_WITH_DETAIL_NUM]:
+            for share in Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)):
+                share_detail_content.append(str(ShareSerializer(share).data))
+
+        aggregate()
+
+        # all shares in last 5 rounds must remain with details
+        for solved in self.solved[-5:]:
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 24)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, False)
+
+        # all shares in 3 rounds before above status must be aggregated
+        for solved in self.solved[2:-5]:
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
+            for miner in Miner.objects.all():
+                self.assertEqual(AggregateShare.objects.filter(miner=miner, solved_share=solved).count(), 1)
+                agg = AggregateShare.objects.get(miner=miner, solved_share=solved)
+                parameters = [agg.valid_num, agg.invalid_num, agg.repetitious_num, agg.difficulty_sum]
+                if miner.public_key in ['0', '1', '2']:
+                    self.assertEqual(parameters, [2, 2, 2, 60])
+                else:
+                    self.assertEqual(parameters, [1, 1, 1, 30])
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, True)
+
+        # all other rounds must be aggregated and removed
+        for solved in self.solved[0:2]:
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+
+        share_detail_content = '\n'.join(sorted(share_detail_content))
+
+        self.assertTrue(os.path.exists(self.shares_detail_file))
+        with open(self.shares_detail_file, 'r') as file:
+            content = file.read().rstrip()
+            content = '\n'.join(sorted(content.split('\n')))
+            self.assertEqual(share_detail_content, content)
+
+        self.assertTrue(os.path.exists(self.shares_aggregate_file))
+        with open(self.shares_aggregate_file, 'r') as file:
+            content = file.read().rstrip()
+            content = content.split('\n')
+            self.assertEqual(len(content), 10)
+
+    def test_share_6_with_detail_other_aggregated(self, mocked_time):
+        """
+        some aggregated must be removed, some details must be aggregated
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        share_aggregate_content = []
+        share_detail_content = []
+
+        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
+            share_detail_content.append(str(ShareSerializer(share).data))
+
+        for solved in self.solved[:4]:
+            solved.is_aggregated = True
+            solved.save()
+            Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).delete()
+            for miner in Miner.objects.all():
+                if miner.public_key in ['0', '1', '2']:
+                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=2,
+                                                  invalid_num=2, repetitious_num=2, difficulty_sum=60)
+                else:
+                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
+                                                  invalid_num=1, repetitious_num=1, difficulty_sum=30)
+
+        for solved in self.solved[:2]:
+            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
+                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
+
+        aggregate()
+
+        # all shares in last 5 rounds must remain with details
+        for solved in self.solved[-5:]:
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 24)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, False)
+
+        # 5th round must remain aggregated
+        for solved in self.solved[2:5]:
+            for miner in Miner.objects.all():
+                self.assertEqual(AggregateShare.objects.filter(miner=miner, solved_share=solved).count(), 1)
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, True)
+
+        # 2 aggregated rounds must be removed
+        for solved in self.solved[:2]:
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+
+        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
+        share_detail_content = '\n'.join(sorted(share_detail_content))
+
+        for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
+                                           (self.shares_detail_file, share_detail_content)]:
+            self.assertTrue(os.path.exists(filename))
+            with open(filename, 'r') as file:
+                content = file.read().rstrip()
+                content = '\n'.join(sorted(content.split('\n')))
+                self.assertEqual(expected_content, content)
+
+    def test_share_6_with_detail_other_aggregated_some_miners_not_exist_in_round(self, mocked_time):
+        """
+        some aggregated must be removed, some details must be aggregated
+        some miners are not in the round to be aggregate, no aggregate object must be created for that miner
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        share_aggregate_content = []
+        share_detail_content = []
+
+        # first miner is not present in 5th round, so nothing must be aggregated for him
+        Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1),
+                             miner=Miner.objects.all()[0]).delete()
+
+        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
+            share_detail_content.append(str(ShareSerializer(share).data))
+
+        for solved in self.solved[:4]:
+            solved.is_aggregated = True
+            solved.save()
+            Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).delete()
+            for miner in Miner.objects.all():
+                if miner.public_key in ['0', '1', '2']:
+                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=2,
+                                                  invalid_num=2, repetitious_num=2, difficulty_sum=60)
+                else:
+                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
+                                                  invalid_num=1, repetitious_num=1, difficulty_sum=30)
+
+        for solved in self.solved[:2]:
+            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
+                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
+
+        aggregate()
+
+        # all shares in last 5 rounds must remain with details
+        for solved in self.solved[-5:]:
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, False)
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 24)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+
+        # 2 rounds must remain aggregated with all miners
+        for solved in self.solved[2:4]:
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, True)
+            for miner in Miner.objects.all():
+                self.assertEqual(AggregateShare.objects.filter(miner=miner, solved_share=solved).count(), 1)
+
+        # one round must be aggregated with all miners except the first onw
+        for miner in Miner.objects.all()[1:]:
+            self.assertEqual(AggregateShare.objects.filter(miner=miner, solved_share=self.solved[4]).count(), 1)
+        self.assertEqual(
+            AggregateShare.objects.filter(miner=Miner.objects.all()[0], solved_share=self.solved[4]).count(), 0)
+
+        # 2 aggregated rounds must be removed
+        for solved in self.solved[:2]:
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+
+        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
+        share_detail_content = '\n'.join(sorted(share_detail_content))
+
+        for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
+                                           (self.shares_detail_file, share_detail_content)]:
+            self.assertTrue(os.path.exists(filename))
+            with open(filename, 'r') as file:
+                content = file.read().rstrip()
+                content = '\n'.join(sorted(content.split('\n')))
+                self.assertEqual(expected_content, content)
+
+    def test_share_6_with_detail_other_aggregated_files_not_empty(self, mocked_time):
+        """
+        some aggregated must be removed, some details must be aggregated
+        balance, shares_detail and shares_aggregate files are not empty, must be appended
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        share_aggregate_content = ['just', 'something', 'random']
+        share_detail_content = ['just', 'something', 'random']
+
+        for file in [self.shares_aggregate_file, self.shares_detail_file]:
+            with open(file, 'w') as cur:
+                cur.write('just\nsomething\nrandom\n')
+
+        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
+            share_detail_content.append(str(ShareSerializer(share).data))
+
+        for solved in self.solved[:4]:
+            solved.is_aggregated = True
+            solved.save()
+            Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).delete()
+            for miner in Miner.objects.all():
+                if miner.public_key in ['0', '1', '2']:
+                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=2,
+                                                  invalid_num=2, repetitious_num=2, difficulty_sum=60)
+                else:
+                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
+                                                  invalid_num=1, repetitious_num=1, difficulty_sum=30)
+
+        for solved in self.solved[:2]:
+            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
+                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
+
+        aggregate()
+
+        # all shares in last 5 rounds must remain with details
+        for solved in self.solved[-5:]:
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, False)
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 24)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+
+        # 5th round must remain aggregated
+        for solved in self.solved[2:5]:
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, True)
+            for miner in Miner.objects.all():
+                self.assertEqual(AggregateShare.objects.filter(miner=miner, solved_share=solved).count(), 1)
+
+        # 2 aggregated rounds must be removed
+        for solved in self.solved[:2]:
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+
+        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
+        share_detail_content = '\n'.join(sorted(share_detail_content))
+
+        self.assertTrue(os.path.exists(self.shares_aggregate_file))
+        for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
+                                           (self.shares_detail_file, share_detail_content)]:
+            with open(filename, 'r') as file:
+                content = file.read().rstrip()
+                content = '\n'.join(sorted(content.split('\n')))
+                self.assertEqual(expected_content, content)
+
+    def test_share_5_detail_3_aggregated(self, mocked_time):
+        """
+        all ok, nothing should happen
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        for solved in self.solved[:2]:
+            solved.is_aggregated = True
+            solved.save()
+            Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).delete()
+
+        for solved in self.solved[2:5]:
+            solved.is_aggregated = True
+            solved.save()
+            Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).delete()
+            for miner in Miner.objects.all():
+                if miner.public_key in ['0', '1', '2']:
+                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=2,
+                                                  invalid_num=2, repetitious_num=2, difficulty_sum=60)
+                else:
+                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
+                                                  invalid_num=1, repetitious_num=1, difficulty_sum=30)
+
+        aggregate()
+
+        # all shares in last 5 rounds must remain with details
+        for solved in self.solved[-5:]:
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, False)
+            # the solved share must remain
+            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
+            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 24)
+            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
+
+        for solved in self.solved[2:5]:
+            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, True)
+            for miner in Miner.objects.all():
+                self.assertEqual(AggregateShare.objects.filter(miner=miner, solved_share=solved).count(), 1)
+
+        self.assertTrue(not os.path.exists(self.shares_aggregate_file))
+        self.assertTrue(not os.path.exists(self.shares_detail_file))
+
+    def test_balance_all_with_detail(self, mocked_time):
+        """
+        all balances are with details
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        balance_detail_content = []
+
+        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
+            balance_detail_content.append(str(BalanceSerializer(balance).data))
+
+        aggregate()
+
+        for miner in Miner.objects.all():
+            self.assertEqual(Balance.objects.filter(miner=miner, status=2, balance=int(60e9)).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner=miner, status=3, balance=int(-20e9)).count(), 1)
+
+        for solved in self.solved[2:]:
+            for miner in Miner.objects.all():
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=2,
+                                                        balance=int(30e9)).count(), 1)
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=3,
+                                                        balance=int(-10e9)).count(), 1)
+
+        balance_detail_content = '\n'.join(sorted(balance_detail_content))
+
+        for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
+            self.assertTrue(os.path.exists(filename))
+            with open(filename, 'r')as file:
+                content = file.read().rstrip()
+                content = '\n'.join(sorted(content.split('\n')))
+                self.assertEqual(expected_content, content)
+
+    def test_balance_all_with_detail_file_not_empty(self, mocked_time):
+        """
+        all balances are with details
+        balance detail file is already present with some values
+        should be appended to the end of the file
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        balance_detail_content = ['just', 'something', 'random']
+
+        with open(self.balance_detail_file, 'w') as file:
+            file.write('just\nsomething\nrandom\n')
+
+        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
+            balance_detail_content.append(str(BalanceSerializer(balance).data))
+
+        aggregate()
+
+        for miner in Miner.objects.all():
+            self.assertEqual(Balance.objects.filter(miner=miner, status=2, balance=int(60e9)).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner=miner, status=3, balance=int(-20e9)).count(), 1)
+
+        for solved in self.solved[2:]:
+            for miner in Miner.objects.all():
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=2,
+                                                        balance=int(30e9)).count(), 1)
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=3,
+                                                        balance=int(-10e9)).count(), 1)
+
+        balance_detail_content = '\n'.join(sorted(balance_detail_content))
+
+        for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
+            self.assertTrue(os.path.exists(filename))
+            with open(filename, 'r') as file:
+                content = file.read().rstrip()
+                content = '\n'.join(sorted(content.split('\n')))
+                self.assertEqual(expected_content, content)
+
+    def test_balance_all_with_detail_some_without_share(self, mocked_time):
+        """
+        all balances are with details
+        some balances don't have share filed
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        balance_detail_content = []
+
+        b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(100e9), status=2)
+        Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
+        b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(-50e9), status=3)
+        Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
+
+        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
+            balance_detail_content.append(str(BalanceSerializer(balance).data))
+
+        aggregate()
+
+        for miner in Miner.objects.all()[1:]:
+            self.assertEqual(Balance.objects.filter(miner=miner, status=2, balance=int(60e9)).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner=miner, status=3, balance=int(-20e9)).count(), 1)
+
+        self.assertEqual(Balance.objects.filter(miner=Miner.objects.all()[0], status=2, balance=int(160e9)).count(), 1)
+        self.assertEqual(Balance.objects.filter(miner=Miner.objects.all()[0], status=3, balance=int(-70e9)).count(), 1)
+
+        for solved in self.solved[2:]:
+            for miner in Miner.objects.all():
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=2,
+                                                        balance=int(30e9)).count(), 1)
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=3,
+                                                        balance=int(-10e9)).count(), 1)
+
+        balance_detail_content = '\n'.join(sorted(balance_detail_content))
+
+        for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
+            self.assertTrue(os.path.exists(filename))
+            with open(filename, 'r') as file:
+                content = file.read().rstrip()
+                content = '\n'.join(sorted(content.split('\n')))
+                self.assertEqual(expected_content, content)
+
+    @override_settings(KEEP_BALANCE_WITH_DETAIL_NUM=0)
+    def test_balance_all_with_detail_no_detail_remain(self, mocked_time):
+        """
+        no detail should remain, all should be aggregated
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        balance_detail_content = []
+        settings.KEEP_BALANCE_WITH_DETAIL_NUM = 0
+
+        for balance in Balance.objects.all():
+            balance_detail_content.append(str(BalanceSerializer(balance).data))
+
+        aggregate()
+
+        for miner in Miner.objects.all():
+            self.assertEqual(Balance.objects.filter(miner=miner, status=2, balance=int(300e9)).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner=miner, status=3, balance=int(-100e9)).count(), 1)
+
+        for solved in self.solved:
+            for miner in Miner.objects.all():
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=2,
+                                                        balance=int(30e9)).count(), 0)
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=3,
+                                                        balance=int(-10e9)).count(), 0)
+
+        balance_detail_content = '\n'.join(sorted(balance_detail_content))
+
+        for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
+            self.assertTrue(os.path.exists(filename))
+            with open(filename, 'r') as file:
+                content = file.read().rstrip()
+                content = '\n'.join(sorted(content.split('\n')))
+                self.assertEqual(expected_content, content)
+
+    def test_balance_all_with_detail_with_immature_and_pending(self, mocked_time):
+        """
+        no detail should remain, all should be aggregated
+        immature and pending balances should remain the same
+        """
+        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
+                                                                  '%Y-%m-%d %H:%M:%S.%f')
+        balance_detail_content = []
+
+        for file in [self.balance_detail_file]:
+            if os.path.exists(file):
+                os.remove(file)
+
+        b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(100e9), status=1)
+        Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
+        b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(-50e9), status=4)
+        Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
+
+        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at, status__in=[2, 3]):
+            balance_detail_content.append(str(BalanceSerializer(balance).data))
+
+        aggregate()
+
+        self.assertEqual(Balance.objects.filter(status=4).count(), 1)
+        self.assertEqual(Balance.objects.filter(status=1).count(), 1)
+
+        for miner in Miner.objects.all():
+            self.assertEqual(Balance.objects.filter(miner=miner, status=2, balance=int(60e9)).count(), 1)
+            self.assertEqual(Balance.objects.filter(miner=miner, status=3, balance=int(-20e9)).count(), 1)
+
+        for solved in self.solved[2:]:
+            for miner in Miner.objects.all():
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=2,
+                                                        balance=int(30e9)).count(), 1)
+                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status=3,
+                                                        balance=int(-10e9)).count(), 1)
+
+        balance_detail_content = '\n'.join(sorted(balance_detail_content))
+
+        for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
+            self.assertTrue(os.path.exists(filename))
+            with open(filename, 'r') as file:
+                content = file.read().rstrip()
+                content = '\n'.join(sorted(content.split('\n')))
+                self.assertEqual(expected_content, content)
+
+    def tearDown(self):
+        # restoring setting parameters
+        Miner.objects.all().delete()
+        Share.objects.all().delete()
+        AggregateShare.objects.all().delete()
+        for file in [self.balance_detail_file, self.shares_detail_file, self.shares_aggregate_file]:
+            if os.path.exists(file):
+                os.remove(file)
