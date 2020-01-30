@@ -2,7 +2,7 @@ from django.db.models import Count, Q, Sum
 from django.db import transaction
 
 from ErgoAccounting.production import API_KEY, NODE_ADDRESS
-from .models import Share, Balance, Miner, Configuration
+from .models import Share, Balance, Configuration, Address
 from django.utils import timezone
 from urllib.parse import urljoin
 import json
@@ -338,3 +338,19 @@ class BlockDataIterable(object):
             # if cache is empty we must load remote data
             self.load_remote_data()
         return self._count
+
+
+def get_miner_payment_address(miner):
+    """
+    :param miner: a miner object
+    :return: selected_address associated with miner address if one selected
+             or the last used withdraw address. returns None if no withdraw address is available
+    """
+    if miner.selected_address is not None:
+        return miner.selected_address.address
+
+    address = Address.objects.filter(address_miner=miner, category='withdraw').order_by('-last_used').first()
+    if address is not None:
+        return address.address
+
+    return None
