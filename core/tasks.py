@@ -11,7 +11,7 @@ from django.db.models import Q, Sum, Count
 from ErgoAccounting.celery import app
 from core.models import Miner, Balance, Configuration, Share, AggregateShare
 from core.serializers import BalanceSerializer, ShareSerializer, AggregateShareSerializer
-from core.utils import node_request
+from core.utils import node_request, get_miner_payment_address
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,17 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
     if not outputs:
         return
 
+    pk_to_address = {
+        miner.public_key: get_miner_payment_address(miner) for _, miner in pk_to_miner.items()
+    }
+
+    invalid_requests = [(pk, amount, obj_id) for pk, amount, obj_id in outputs if pk_to_address[pk] is None]
+    if invalid_requests:
+        logger.error("some miners don't have valid payment addresses!, {}".format([x[0] for x in invalid_requests]))
+
+    remove_pending_balances(invalid_requests)
+    outputs = [(pk, amount, obj_id) for pk, amount, obj_id in outputs if pk_to_address[pk] is not None]
+
     MAX_NUMBER_OF_OUTPUTS = Configuration.objects.MAX_NUMBER_OF_OUTPUTS
     TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
 
@@ -139,7 +150,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
 
         data = {
             'requests': [{
-                'address': x[0],
+                'address': pk_to_address[x[0]],
                 'value': x[1] - (TRANSACTION_FEE if subtract_fee else 0)
             } for x in chunk],
             'fee': TRANSACTION_FEE,
