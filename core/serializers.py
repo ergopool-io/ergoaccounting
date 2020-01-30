@@ -13,11 +13,15 @@ class AggregateShareSerializer(serializers.ModelSerializer):
 
 class ShareSerializer(serializers.ModelSerializer):
     miner = serializers.CharField()
+    miner_address = serializers.CharField()
+    lock_address = serializers.CharField()
+    withdraw_address = serializers.CharField()
     difficulty = serializers.IntegerField()
 
     class Meta:
         model = Share
-        fields = ['share', 'miner', 'status', 'transaction_id', 'block_height', 'difficulty', 'created_at']
+        fields = ['share', 'miner', 'status', 'transaction_id', 'block_height', 'difficulty',
+                  'created_at', 'miner_address', 'lock_address', 'withdraw_address']
         write_only_fields = ['transaction_id', 'block_height']
 
     def validate(self, attrs):

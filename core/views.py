@@ -1,22 +1,21 @@
+import logging
+from datetime import datetime, timedelta
 from pydoc import locate
 
+from django.conf import settings
 from django.db.models import Q, Count, Sum, Max, Min
-from datetime import datetime, timedelta
+from django.utils import timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from django.utils import timezone
-from urllib.parse import urljoin, urlencode, urlparse, parse_qsl, urlunparse
-import requests
-import logging
-from django.conf import settings
-from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable
-from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE
+from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
+    CONFIGURATION_KEY_TO_TYPE, Address
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from core.tasks import generate_and_send_transaction
+from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +51,26 @@ class ShareView(viewsets.GenericViewSet,
         _share = serializer.validated_data['share']
         _status = serializer.validated_data['status']
         rep_share = Share.objects.filter(share=_share)
+
+        miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
+                                                      address_miner=miner, category='miner')[0]
+        lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
+                                                     address_miner=miner, category='lock')[0]
+        withdraw_address = Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
+                                                         address_miner=miner, category='withdraw')[0]
+        # updating updated_at field
+        miner_address.save()
+        lock_address.save()
+        withdraw_address.save()
+
         if not rep_share:
             logger.info('New share, saving.')
-            serializer.save(miner=miner)
+            serializer.save(miner=miner, miner_address=miner_address,
+                            lock_address=lock_address, withdraw_address=withdraw_address)
         else:
             logger.info('Repetitious share, saving.')
-            serializer.save(status="repetitious", miner=miner)
+            serializer.save(status="repetitious", miner=miner, miner_address=miner_address,
+                            lock_address=lock_address, withdraw_address=withdraw_address)
             _status = "repetitious"
         if _status == "solved":
             logger.info('Solved share, saving.')
@@ -236,6 +249,25 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
     queryset = Miner.objects.all()
     lookup_field = 'public_key'
 
+    @action(detail=True, methods=['post'])
+    def set_address(self, request, public_key=None):
+        """
+        miner can set it's preferred address
+        """
+        miner = self.get_object()
+        address = request.data.get('address', None)
+        if address is None:
+            return Response({'message': 'address field must be present.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        miner_address = Address.objects.filter(address_miner=miner, address=address).first()
+        if miner_address is None:
+            return Response({'message': "provided address is not present in miner's address list."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        miner.selected_address = miner_address
+        miner.save()
+        return Response({'message': 'address successfully was set for miner.'}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], name='withdrawal')
     def withdraw(self, request, public_key=None):
         """
@@ -257,7 +289,9 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
             return Response({'message': 'withdraw_amount field is not valid.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if requested_amount < TRANSACTION_FEE:
-            return Response({'message': 'withdraw_amount must be bigger than transaction fee: {}.'.format(TRANSACTION_FEE)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'message': 'withdraw_amount must be bigger than transaction fee: {}.'.format(TRANSACTION_FEE)},
+                status=status.HTTP_400_BAD_REQUEST)
 
         if requested_amount > total:
             return Response({'message': 'withdraw_amount is bigger than total balance.'},

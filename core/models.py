@@ -1,11 +1,11 @@
+import logging
+from pydoc import locate
+
 from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
-from pydoc import locate
 from frozendict import frozendict
-import logging
 
 logger = logging.getLogger(__name__)
-
 
 CONFIGURATION_KEY_CHOICE = (
     # total reward of a round
@@ -76,11 +76,29 @@ class Miner(models.Model):
     nick_name = models.CharField(max_length=255, blank=True)
     public_key = models.CharField(max_length=256, unique=True)
     periodic_withdrawal_amount = models.BigIntegerField(null=True)
+    selected_address = models.ForeignKey('core.Address', on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return '{}'.format(self.public_key)
+
+
+class Address(models.Model):
+    STATUS_CHOICE = (
+        ("miner", "miner address"),
+        ("lock", "lock address"),
+        ("withdraw", "withdraw address")
+    )
+
+    address = models.CharField(max_length=255, blank=False, null=False)
+    category = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
+    address_miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.address
 
 
 class Share(models.Model):
@@ -98,6 +116,9 @@ class Share(models.Model):
     difficulty = models.BigIntegerField(blank=False)
     block_height = models.BigIntegerField(blank=True, null=True)
     is_aggregated = models.BooleanField(default=False)
+    miner_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='miner_addresses')
+    lock_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='lock_addresses')
+    withdraw_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='withdraw_addresses')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -137,7 +158,7 @@ class AggregateShare(models.Model):
     repetitious_num = models.PositiveIntegerField()
     difficulty_sum = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
 
 class ConfigurationManager(models.Manager):
 
