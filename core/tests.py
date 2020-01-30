@@ -15,10 +15,10 @@ from rest_framework import status
 from django.conf import settings
 
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
-    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE
+    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
 from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction
-from core.utils import RewardAlgorithm, compute_hash_rate
+from core.utils import RewardAlgorithm, compute_hash_rate, get_miner_payment_address
 
 
 def random_string(length=10):
@@ -31,6 +31,11 @@ class ShareTestCase(TestCase):
     def setUp(self):
         self.client = Client()
         Miner.objects.create(public_key="2", nick_name="Parsa")
+        self.addresses = {
+            'miner_address': random_string(),
+            'lock_address': random_string(),
+            'withdraw_address': random_string()
+        }
 
     @patch('core.utils.RewardAlgorithm.get_instance')
     def test_prop_call(self, mocked_call_prop):
@@ -65,6 +70,7 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 'status': '1',
                 'difficulty': 123456}
+        data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -80,6 +86,7 @@ class ShareTestCase(TestCase):
                 "transaction_id": "this is a transaction id",
                 'status': '1',
                 'difficulty': 123456}
+        data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -96,13 +103,14 @@ class ShareTestCase(TestCase):
                 "block_height": 40404,
                 'status': 'solved',
                 'difficulty': 123456}
+        data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertTrue(Share.objects.filter(share=share).exists())
 
-    def test_validad_unsolved_share(self):
+    def test_validate_unsolved_share_store_addresses(self):
         """
         test if a non-solution submitted share must store with None in transaction_id and block_height
-        :return:
+        3 address must be generated for miner
         """
         share = uuid.uuid4().hex
         data = {'share': share,
@@ -112,11 +120,63 @@ class ShareTestCase(TestCase):
                 "block_height": 40404,
                 'status': 'valid',
                 'difficulty': 123456}
+        data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertEqual(Share.objects.filter(share=share).count(), 1)
         transaction = Share.objects.filter(share=share).first()
         self.assertIsNone(transaction.transaction_id)
         self.assertIsNone(transaction.block_height)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['miner_address'],
+                                                category='miner').count(), 1)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['lock_address'],
+                                                category='lock').count(), 1)
+        self.assertEqual(
+            Address.objects.filter(address_miner__public_key='1', address=self.addresses['withdraw_address'],
+                                   category='withdraw').count(), 1)
+
+    def test_validate_unsolved_share_update_last_used(self):
+        """
+        test if a non-solution submitted share must store with None in transaction_id and block_height
+        addresses are present, last_used field must be updated
+        """
+        miner_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                 address=self.addresses['miner_address'], category='miner').last_used
+        lock_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                address=self.addresses['lock_address'], category='lock').last_used
+        withdraw_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                    address=self.addresses['withdraw_address'],
+                                                    category='withdraw').last_used
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '2',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                "block_height": 40404,
+                'status': 'valid',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        self.assertEqual(Share.objects.filter(share=share).count(), 1)
+        transaction = Share.objects.filter(share=share).first()
+        self.assertIsNone(transaction.transaction_id)
+        self.assertIsNone(transaction.block_height)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
+                                                category='miner').count(), 1)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
+                                                category='lock').count(), 1)
+        self.assertEqual(
+            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
+                                   category='withdraw').count(), 1)
+        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
+                                               category='miner').first().last_used > miner_last_used)
+        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
+                                               category='lock').first().last_used > lock_last_used)
+        self.assertTrue(
+            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
+                                   category='withdraw').first().last_used > withdraw_last_used)
+
+    def tearDown(self):
+        Address.objects.all().delete()
 
 
 class PropFunctionTest(TestCase):
@@ -980,6 +1040,8 @@ class TransactionGenerateTestCase(TestCase):
         self.outputs = [(pk, int((i + 1) * 1e10)) for i, pk in enumerate(pks)]
         self.pending_balances = [Balance(miner=Miner.objects.get(public_key=x[0]), balance=-x[1], status=4) for x in
                                  self.outputs]
+        for pk, _ in self.outputs:
+            Address.objects.create(address_miner=Miner.objects.get(public_key=pk), category='withdraw', address=pk)
 
     def test_generate_three_transactions_max_num_output_4(self, mocked_request):
         """
@@ -1118,7 +1180,8 @@ class TransactionGenerateTestCase(TestCase):
         """
         Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='10')
         outputs = self.outputs[:]
-        Miner.objects.create(public_key='invalid_input')
+        miner = Miner.objects.create(public_key='invalid_input')
+        Address.objects.create(address_miner=miner, category='withdraw', address='invalid_input')
         outputs[0] = ('invalid_input', int(1e10))
 
         for i, _ in enumerate(outputs):
@@ -1832,7 +1895,6 @@ class ImmatureToMatureTestCase(TestCase):
         Balance.objects.all().delete()
 
 
-
 @override_settings(KEEP_BALANCE_WITH_DETAIL_NUM=8)
 @override_settings(KEEP_SHARES_WITH_DETAIL_NUM=5)
 @override_settings(KEEP_SHARES_AGGREGATION_NUM=3)
@@ -1896,7 +1958,7 @@ class AggregateTestCase(TestCase):
         all shares and balances are present
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         share_detail_content = []
 
         for solved in self.solved[:-settings.KEEP_SHARES_WITH_DETAIL_NUM]:
@@ -1954,7 +2016,7 @@ class AggregateTestCase(TestCase):
         some aggregated must be removed, some details must be aggregated
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         share_aggregate_content = []
         share_detail_content = []
 
@@ -2017,7 +2079,7 @@ class AggregateTestCase(TestCase):
         some miners are not in the round to be aggregate, no aggregate object must be created for that miner
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         share_aggregate_content = []
         share_detail_content = []
 
@@ -2090,7 +2152,7 @@ class AggregateTestCase(TestCase):
         balance, shares_detail and shares_aggregate files are not empty, must be appended
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         share_aggregate_content = ['just', 'something', 'random']
         share_detail_content = ['just', 'something', 'random']
 
@@ -2156,9 +2218,9 @@ class AggregateTestCase(TestCase):
         all ok, nothing should happen
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         for solved in self.solved[:2]:
             solved.is_aggregated = True
             solved.save()
@@ -2199,7 +2261,7 @@ class AggregateTestCase(TestCase):
         all balances are with details
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         balance_detail_content = []
 
         for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
@@ -2234,7 +2296,7 @@ class AggregateTestCase(TestCase):
         should be appended to the end of the file
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         balance_detail_content = ['just', 'something', 'random']
 
         with open(self.balance_detail_file, 'w') as file:
@@ -2271,7 +2333,7 @@ class AggregateTestCase(TestCase):
         some balances don't have share filed
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         balance_detail_content = []
 
         b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(100e9), status=2)
@@ -2313,7 +2375,7 @@ class AggregateTestCase(TestCase):
         no detail should remain, all should be aggregated
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         balance_detail_content = []
         settings.KEEP_BALANCE_WITH_DETAIL_NUM = 0
 
@@ -2348,7 +2410,7 @@ class AggregateTestCase(TestCase):
         immature and pending balances should remain the same
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                                  '%Y-%m-%d %H:%M:%S.%f')
+                                                         '%Y-%m-%d %H:%M:%S.%f')
         balance_detail_content = []
 
         for file in [self.balance_detail_file]:
@@ -2396,3 +2458,69 @@ class AggregateTestCase(TestCase):
         for file in [self.balance_detail_file, self.shares_detail_file, self.shares_aggregate_file]:
             if os.path.exists(file):
                 os.remove(file)
+
+
+class GetMinerAddressTestCase(TestCase):
+    """
+    Test class for aggregation
+    """
+
+    def setUp(self):
+        """
+        creating a miners
+        """
+        self.miner = Miner.objects.create(public_key='miner')
+
+    def test_miner_doesnt_have_address(self):
+        """
+        no address, return None
+        """
+        address = get_miner_payment_address(self.miner)
+        self.assertEqual(address, None)
+
+    def test_miner_has_several_withdraw_address_non_set(self):
+        """
+        several withdraw address, return the latest used one
+        """
+        selected = None
+        for _ in range(5):
+            selected = Address.objects.create(address_miner=self.miner, address=random_string(), category='withdraw')
+
+        address = get_miner_payment_address(self.miner)
+        self.assertEqual(address, selected.address)
+
+    def test_miner_has_several_address_non_set(self):
+        """
+        several withdraw address, return the latest used one
+        do not return addresses other than withdraw
+        """
+        selected = None
+        for _ in range(5):
+            selected = Address.objects.create(address_miner=self.miner, address=random_string(), category='withdraw')
+
+        Address.objects.create(address_miner=self.miner, address=random_string(), category='lock')
+
+        address = get_miner_payment_address(self.miner)
+        self.assertEqual(address, selected.address)
+
+    def test_miner_has_several_address_set_one(self):
+        """
+        several withdraw address
+        do not return addresses other than withdraw
+        miner has already selected one as payment address
+        """
+        for _ in range(5):
+            Address.objects.create(address_miner=self.miner, address=random_string(), category='withdraw')
+
+        Address.objects.create(address_miner=self.miner, address=random_string(), category='lock')
+
+        self.miner.selected_address = Address.objects.filter(category='withdraw').order_by('last_used').first()
+        self.miner.save()
+        selected = self.miner.selected_address
+
+        address = get_miner_payment_address(self.miner)
+        self.assertEqual(address, selected.address)
+
+    def tearDown(self):
+        Miner.objects.all().delete()
+        Address.objects.all().delete()
