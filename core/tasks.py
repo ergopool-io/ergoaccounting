@@ -37,7 +37,7 @@ def periodic_withdrawal():
     }
 
     # update miners balances, balances with "withdraw", "pending_withdrawal" and "mature" status
-    balances = Balance.objects.filter(status__in=[2, 3, 4])
+    balances = Balance.objects.filter(status__in=["mature", "withdraw", "pending_withdrawal"])
     for balance in balances:
         pk_to_total_balance[balance.miner.public_key] += balance.balance
 
@@ -58,7 +58,7 @@ def periodic_withdrawal():
     try:
         logger.info('Periodic withdrawal for #{} miners'.format(len(outputs)))
         # Creating balance object with pending_withdrawal status
-        objects = [Balance(miner=pk_to_miner.get(pk), status=4, balance=-balance) for pk, balance in outputs]
+        objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance) for pk, balance in outputs]
         Balance.objects.bulk_create(objects)
         outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
         generate_and_send_transaction(outputs)
@@ -160,7 +160,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
         # create balances with status pending_withdrawal
         remove_pending_balances(chunk)
         balances = [Balance(miner=pk_to_miner[pk],
-                            balance=-value, status=3) for pk, value, _ in chunk]
+                            balance=-value, status="withdraw") for pk, value, _ in chunk]
         Balance.objects.bulk_create(balances)
 
         res = node_request('wallet/transaction/send', data=data, request_type='post')
@@ -193,7 +193,7 @@ def immature_to_mature():
     CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
 
     # getting all shares with immature balances which have been created at least in CONFIRMATION_LENGTH block ago
-    shares = Share.objects.filter(balance__status=1, block_height__lte=(current_height - CONFIRMATION_LENGTH),
+    shares = Share.objects.filter(balance__status="immature", block_height__lte=(current_height - CONFIRMATION_LENGTH),
                                   status='solved').distinct()
     q = Q()
     for share in shares:
@@ -206,10 +206,10 @@ def immature_to_mature():
         num_confirmations = txt_res['numConfirmations']
 
         if num_confirmations >= CONFIRMATION_LENGTH:
-            q |= Q(status=1, share=share)
+            q |= Q(status="immature", share=share)
 
     if len(q) > 0:
-        Balance.objects.filter(q).update(status=2)
+        Balance.objects.filter(q).update(status="mature")
 
 
 @app.task
@@ -235,24 +235,24 @@ def aggregate():
     solved = Share.objects.filter(status='solved').order_by('-created_at')
     if solved.count() > settings.KEEP_BALANCE_WITH_DETAIL_NUM:
         balance_solved_share = solved[settings.KEEP_BALANCE_WITH_DETAIL_NUM]
-        bal_mature_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at, status=2) \
+        bal_mature_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at, status="mature") \
             .values('miner').annotate(balance=Sum('balance'), num=Count('id'))
-        bal_withdraw_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at, status=3) \
+        bal_withdraw_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at, status="withdraw") \
             .values('miner').annotate(balance=Sum('balance'), num=Count('id'))
 
-        new_balances = [Balance(miner_id=bal['miner'], balance=bal['balance'], status=2)
+        new_balances = [Balance(miner_id=bal['miner'], balance=bal['balance'], status="mature")
                         for bal in bal_mature_aggregation]
-        new_balances += [Balance(miner_id=bal['miner'], balance=bal['balance'], status=3)
+        new_balances += [Balance(miner_id=bal['miner'], balance=bal['balance'], status="withdraw")
                          for bal in bal_withdraw_aggregation]
 
         # removing previous balances and creating new aggregated ones
         with transaction.atomic():
             to_delete_balances = Balance.objects.filter(created_at__lte=balance_solved_share.created_at,
-                                                        status__in=[2, 3])
+                                                        status__in=["mature", "withdraw"])
             details = [str(BalanceSerializer(balance).data) for balance in to_delete_balances]
             to_delete_balances.delete()
             Balance.objects.filter(created_at__lte=balance_solved_share.created_at,
-                                   status__in=[2, 3]).delete()
+                                   status__in=["mature", "withdraw"]).delete()
             Balance.objects.bulk_create(new_balances)
 
             if len(details) > 0:
