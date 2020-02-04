@@ -95,7 +95,7 @@ class BalanceView(viewsets.GenericViewSet,
         :param kwargs:
         :return:
         """
-        serializer.save(status=3)
+        serializer.save(status="withdraw")
 
 
 class ConfigurationViewSet(viewsets.GenericViewSet,
@@ -187,9 +187,9 @@ class DashboardView(viewsets.GenericViewSet,
         round_shares = miners.values('public_key').annotate(
             valid_shares=Count('id', filter=Q(share__created_at__gt=last_solved_timestamp, share__status="valid")),
             invalid_shares=Count('id', filter=Q(share__created_at__gt=last_solved_timestamp, share__status="invalid")),
-            immature=Sum('share__balance__balance', filter=Q(share__balance__status=1)),
-            mature=Sum('share__balance__balance', filter=Q(share__balance__status=2)),
-            withdraw=Sum('share__balance__balance', filter=Q(share__balance__status=3)),
+            immature=Sum('share__balance__balance', filter=Q(share__balance__status="immature")),
+            mature=Sum('share__balance__balance', filter=Q(share__balance__status="mature")),
+            withdraw=Sum('share__balance__balance', filter=Q(share__balance__status="withdraw")),
         )
         miners_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME))
         logger.info('Current hash rate: {}'.format(miners_hash_rate))
@@ -277,7 +277,7 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
         TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
         miner = self.get_object()
         # balances with "mature", "withdraw" and "pending_withdrawal" status
-        total = Balance.objects.filter(miner=miner, status__in=[2, 3, 4]).aggregate(Sum('balance')).get('balance__sum')
+        total = Balance.objects.filter(miner=miner, status__in=['mature', 'withdraw', 'pending_withdrawal']).aggregate(Sum('balance')).get('balance__sum')
 
         requested_amount = request.data.get('withdraw_amount')
         try:
@@ -298,7 +298,7 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
                             status=status.HTTP_400_BAD_REQUEST)
 
         # creating a pending_withdrawal status
-        balance = Balance.objects.create(miner=miner, balance=-requested_amount, status=4)
+        balance = Balance.objects.create(miner=miner, balance=-requested_amount, status="pending_withdrawal")
         generate_and_send_transaction.delay([(miner.public_key, requested_amount, balance.pk)],
                                             subtract_fee=True)
         return Response({'message': 'withdrawal was successful.',
