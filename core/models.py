@@ -128,16 +128,16 @@ class Share(models.Model):
 
 class Balance(models.Model):
     STATUS_CHOICE = (
-        (1, "immature"),
-        (2, "mature"),
-        (3, "withdraw"),
-        (4, "pending_withdrawal")
+        ("immature", "immature"),
+        ("mature", "mature"),
+        ("withdraw", "withdraw"),
+        ("pending_withdrawal", "pending_withdrawal")
     )
 
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     share = models.ForeignKey(Share, on_delete=models.CASCADE, null=True)
     balance = models.BigIntegerField(default=0)
-    status = models.IntegerField(blank=False, choices=STATUS_CHOICE, default=1)
+    status = models.CharField(blank=False, choices=STATUS_CHOICE, default="immature", max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
