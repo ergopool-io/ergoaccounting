@@ -1,6 +1,7 @@
 import logging
 from pydoc import locate
 
+from django.contrib.postgres.fields import ArrayField
 from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
 from frozendict import frozendict
@@ -115,6 +116,9 @@ class Share(models.Model):
     transaction_id = models.CharField(max_length=80, blank=True, null=True)
     difficulty = models.BigIntegerField(blank=False)
     block_height = models.BigIntegerField(blank=True, null=True)
+    parent_id = models.CharField(max_length=80, null=False, blank=False, default="0")
+    next_ids = ArrayField(models.CharField(max_length=80, blank=True, null=True), blank=True, null=True, default=list)
+    path = models.CharField(max_length=100, blank=True, null=True)
     is_aggregated = models.BooleanField(default=False)
     miner_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='miner_addresses')
     lock_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='lock_addresses')
