@@ -24,7 +24,7 @@ from core.utils import RewardAlgorithm, compute_hash_rate, get_miner_payment_add
 def random_string(length=10):
     """Generate a random string of fixed length """
     letters = string.ascii_lowercase + string.ascii_uppercase + string.digits
-    return ''.join(random.choice(letters) for i in range(length))
+    return ''.join(random.choice(letters) for _ in range(length))
 
 
 class ShareTestCase(TestCase):
@@ -43,7 +43,9 @@ class ShareTestCase(TestCase):
         data = {'share': '1',
                 'miner': '1',
                 'nonce': '1',
-                'status': '2',
+                'status': 'invalid',
+                'parent_id': random_string(),
+                'next_ids': [],
                 'difficulty': 123456}
         self.client.post('/shares/', data, format='json')
         self.assertTrue(mocked_call_prop.isCalled())
@@ -54,7 +56,10 @@ class ShareTestCase(TestCase):
         data = {'share': '1',
                 'miner': '1',
                 'nonce': '1',
-                'status': '2',
+                'status': 'invalid',
+                'parent_id': 'test',
+                'next_ids': [],
+                'path': '-1',
                 'difficulty': 123456}
         self.client.post('/shares/', data, format='json')
         self.assertFalse(mocked_not_call_prop.called)
@@ -68,7 +73,10 @@ class ShareTestCase(TestCase):
         data = {'share': share,
                 'miner': '1',
                 'nonce': '1',
-                'status': '1',
+                'status': 'solved',
+                'parent_id': 'test',
+                'next_ids': [],
+                'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
@@ -84,7 +92,48 @@ class ShareTestCase(TestCase):
                 'miner': '1',
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
-                'status': '1',
+                'status': 'solved',
+                'parent_id': 'test',
+                'next_ids': [],
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        self.assertFalse(Share.objects.filter(share=share).exists())
+
+    def test_solved_share_without_parent_id(self):
+        """
+        test if a solution submitted without parent_id no solution must store in database
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '1',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                'status': 'valid',
+                "block_height": 40404,
+                'next_ids': [],
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        self.assertFalse(Share.objects.filter(share=share).exists())
+
+    def test_solved_share_without_path(self):
+        """
+        test if a solution submitted without path no solution must store in database
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '1',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                'status': 'valid',
+                "block_height": 40404,
+                'parent_id': 'test',
+                'next_ids': [],
                 'difficulty': 123456}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
@@ -102,10 +151,14 @@ class ShareTestCase(TestCase):
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
                 'status': 'solved',
+                'parent_id': 'test',
+                'next_ids': ['test'],
+                'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertTrue(Share.objects.filter(share=share).exists())
+        self.assertTrue(Share.objects.filter(parent_id='test').exists())
 
     def test_validate_unsolved_share_store_addresses(self):
         """
@@ -118,6 +171,9 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
+                'parent_id': 'test',
+                'next_ids': [],
+                'path': '-1',
                 'status': 'valid',
                 'difficulty': 123456}
         data.update(self.addresses)
@@ -152,6 +208,9 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
+                'parent_id': 'test',
+                'next_ids': [],
+                'path': '-1',
                 'status': 'valid',
                 'difficulty': 123456}
         data.update(self.addresses)
