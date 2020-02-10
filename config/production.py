@@ -22,10 +22,10 @@ ALLOWED_HOSTS = ['127.0.0.1', os.environ.get('HOST'), os.environ.get("INTERNAL_H
 ERGO_EXPLORER_ADDRESS = os.environ.get("EXPLORER", "https://api-testnet.ergoplatform.com/")
 
 # Set limitation for get blocks from explorer and query on database
-MAX_PAGINATION = 200
+MAX_PAGINATION_SIZE = 200
 
 # For pagination requests
-DEFAULT_PAGINATION = 50
+DEFAULT_PAGINATION_SIZE = 50
 
 # Address Node (ex: "http://127.0.0.1:9053/")
 NODE_ADDRESS = "http://%s:%s/" % (os.environ.get("NODE_HOST"), os.environ.get("NODE_PORT", "9052"))
@@ -84,8 +84,26 @@ broker_url = os.environ.get("BROKER_URL")
 app.conf.beat_schedule = {
     'periodic_withdrawal': {
         'task': 'core.tasks.periodic_withdrawal',
-        'schedule': os.environ.get('PERIODIC_WITHDRAWAL_INTERVAL', 24 * 3600),
+        'schedule': int(os.environ.get('PERIODIC_WITHDRAWAL_INTERVAL', 24 * 3600)),
+        'args': ()
+    },
+    'periodic_immature_to_mature': {
+        'task': 'core.tasks.immature_to_mature',
+        'schedule': int(os.environ.get('PERIODIC_IMMATURE_TO_MATURE_INTERVAL', 24 * 3600)),
+        'args': ()
+    },
+    'periodic_aggregate': {
+        'task': 'core.tasks.aggregate',
+        'schedule': int(os.environ.get('PERIODIC_AGGREGATE_INTERVAL', 24 * 3600)),
         'args': ()
     },
 }
 
+# aggregate parameters
+KEEP_SHARES_WITH_DETAIL_NUM = 10
+KEEP_SHARES_AGGREGATION_NUM = 710
+KEEP_BALANCE_WITH_DETAIL_NUM = 720
+AGGREGATE_ROOT_FOLDER = 'aggregation'
+SHARE_DETAIL_FOLDER = 'shares_detail'
+SHARE_AGGREGATE_FOLDER = 'shares_aggregate'
+BALANCE_DETAIL_FOLDER = 'balance_detail'
