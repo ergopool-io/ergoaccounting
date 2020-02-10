@@ -15,7 +15,7 @@ from rest_framework import status
 from django.conf import settings
 
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
-    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address
+    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
 from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction
 from core.utils import RewardAlgorithm, compute_hash_rate, get_miner_payment_address
@@ -145,7 +145,7 @@ class ShareTestCase(TestCase):
         :return:
         """
         share = uuid.uuid4().hex
-        data = {'share': share,
+        data = {"share": share,
                 'miner': '1',
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
@@ -153,12 +153,61 @@ class ShareTestCase(TestCase):
                 'status': 'solved',
                 'parent_id': 'test',
                 'next_ids': ['test'],
+                'client_ip': '127.0.0.1',
                 'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertTrue(Share.objects.filter(share=share).exists())
         self.assertTrue(Share.objects.filter(parent_id='test').exists())
+        self.assertTrue(MinerIP.objects.filter(ip='127.0.0.1').exists())
+
+    def test_miner_ip_exist(self):
+        """
+        test if a ip of miner exist should be update timestamp to updated_at
+        :return:
+        """
+        share = uuid.uuid4().hex
+        miner = Miner.objects.get(public_key="2")
+        client = MinerIP.objects.create(miner=miner, ip='127.0.0.1')
+        data = {"share": share,
+                'miner': '2',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                "block_height": 40404,
+                'status': 'solved',
+                'parent_id': 'test',
+                'next_ids': ['test'],
+                'client_ip': '127.0.0.1',
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        client_update = MinerIP.objects.filter(miner=miner)[0].updated_at
+        self.assertGreater(client_update, client.updated_at)
+
+    def test_miner_exist(self):
+        """
+        test if a miner exist should be create a new object from MinerIP not override
+        :return:
+        """
+        share = uuid.uuid4().hex
+        miner = Miner.objects.get(public_key="2")
+        MinerIP.objects.create(miner=miner, ip='127.0.0.1')
+        data = {"share": share,
+                'miner': '2',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                "block_height": 40404,
+                'status': 'solved',
+                'parent_id': 'test',
+                'next_ids': ['test'],
+                'client_ip': '127.0.0.2',
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        self.assertEqual(MinerIP.objects.filter(miner=miner).count(), 2)
 
     def test_validate_unsolved_share_store_addresses(self):
         """
@@ -173,6 +222,7 @@ class ShareTestCase(TestCase):
                 "block_height": 40404,
                 'parent_id': 'test',
                 'next_ids': [],
+                'client_ip': '127.0.0.1',
                 'path': '-1',
                 'status': 'valid',
                 'difficulty': 123456}
@@ -210,6 +260,7 @@ class ShareTestCase(TestCase):
                 "block_height": 40404,
                 'parent_id': 'test',
                 'next_ids': [],
+                'client_ip': '127.0.0.1',
                 'path': '-1',
                 'status': 'valid',
                 'difficulty': 123456}

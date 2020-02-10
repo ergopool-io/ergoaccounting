@@ -17,6 +17,15 @@ class ShareSerializer(serializers.ModelSerializer):
     lock_address = serializers.CharField()
     withdraw_address = serializers.CharField()
     difficulty = serializers.IntegerField()
+    client_ip = serializers.IPAddressField(allow_blank=True, write_only=True)
+
+    def create(self, validated_data):
+        # Save ip of client in table of Detail Client
+        client_ip = validated_data.pop('client_ip')
+        obj, exist = MinerIP.objects.get_or_create(miner=validated_data.get('miner'), ip=client_ip)
+        obj.save()
+
+        return super(ShareSerializer, self).create(validated_data)
 
     def validate(self, attrs):
         """
@@ -25,7 +34,6 @@ class ShareSerializer(serializers.ModelSerializer):
         :param attrs:
         :return:
         """
-        # status is solved
         if attrs.get("status") == 'solved':
             if not attrs.get("transaction_id"):
                 logger.debug('Transaction id is not provided for solved share.')
@@ -58,8 +66,9 @@ class ShareSerializer(serializers.ModelSerializer):
     class Meta:
         model = Share
         fields = ['share', 'miner', 'status', 'transaction_id', 'block_height', 'difficulty',
-                  'created_at', 'miner_address', 'lock_address', 'withdraw_address', 'parent_id', 'next_ids', 'path']
-        write_only_fields = ['transaction_id', 'block_height', 'parent_id', 'next_ids', 'path']
+                  'created_at', 'miner_address', 'lock_address', 'withdraw_address', 'parent_id',
+                  'next_ids', 'path', 'client_ip']
+        write_only_fields = ['transaction_id', 'block_height', 'parent_id', 'next_ids', 'path', 'client_ip']
 
 
 class BalanceSerializer(serializers.ModelSerializer):

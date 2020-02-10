@@ -130,6 +130,19 @@ class Share(models.Model):
         return '{}-{}'.format(self.miner.public_key, self.share)
 
 
+class MinerIP(models.Model):
+    miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
+    ip = models.GenericIPAddressField(null=False, blank=False, default="1.1.1.1")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ["miner", "ip"]
+
+    def __str__(self):
+        return self.miner.public_key
+
+
 class Balance(models.Model):
     STATUS_CHOICE = (
         ("immature", "immature"),
