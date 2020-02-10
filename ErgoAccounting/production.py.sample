@@ -1,3 +1,6 @@
+import os
+from ErgoAccounting.celery import app
+
 # Database
 # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
 
@@ -15,3 +18,91 @@ DATABASES = {
 # Allowed Hosts
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
 
+# Explorer ergo
+ERGO_EXPLORER_ADDRESS = "https://api.ergoplatform.com/"
+
+# Set limitation for get blocks from explorer and query on database
+MAX_PAGINATION_SIZE = 200
+
+# For pagination requests
+DEFAULT_PAGINATION_SIZE = 50
+
+# Address Node (ex: "http://127.0.0.1:9053/")
+NODE_ADDRESS = "Address Node"
+
+# Secret Key of Node(apiKey) (ex: "623f4e8e440007f45020afabbf56d8ba43144778757ea88497c794ad529a0433")
+API_KEY = "Secret Key of Node"
+
+# Logging config
+# You may want to uncomment mail handler in production!
+# you should get the logger like this whenever you need it: logging.getLogger(__name__)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[%(asctime)s] %(levelname)-8s [%(module)s:%(funcName)s:%(lineno)d]: %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': LOG_LEVEL,
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'formatter': 'verbose',
+            'filename': os.path.join(BASE_DIR, '.important.log')
+        },
+        # 'mail': {
+        #     'level': 'CRITICAL',
+        #     'class': 'django.utils.log.AdminEmailHandler',
+        #     'formatter': 'verbose',
+        # },
+    },
+    'loggers': {
+        'core': {
+            'handlers': ['console', 'file'],
+            'propagate': True,
+            'level': LOG_LEVEL,
+        }
+    }
+}
+
+# set your approprate broker url, e.g, rabbitmq or redis
+CELERY_BROKER_URL = 'amqp://guest:guest@localhost:5672//'
+
+# for interval of the periodic tasks should be set
+# default interval is 24h, it is also possible to change the crontime to a
+# specific time in day, e.g, 00:00am
+app.conf.beat_schedule = {
+    'periodic_withdrawal': {
+        'task': 'core.tasks.periodic_withdrawal',
+        'schedule': int(os.environ.get('PERIODIC_WITHDRAWAL_INTERVAL', 24 * 3600)),
+        'args': ()
+    },
+    'periodic_immature_to_mature': {
+        'task': 'core.tasks.immature_to_mature',
+        'schedule': int(os.environ.get('PERIODIC_IMMATURE_TO_MATURE_INTERVAL', 24 * 3600)),
+        'args': ()
+    },
+    'periodic_aggregate': {
+        'task': 'core.tasks.aggregate',
+        'schedule': int(os.environ.get('PERIODIC_AGGREGATE_INTERVAL', 24 * 3600)),
+        'args': ()
+    },
+}
+
+# aggregate parameters
+KEEP_SHARES_WITH_DETAIL_NUM = 10
+KEEP_SHARES_AGGREGATION_NUM = 710
+KEEP_BALANCE_WITH_DETAIL_NUM = 720
+AGGREGATE_ROOT_FOLDER = 'aggregation'
+SHARE_DETAIL_FOLDER = 'shares_detail'
+SHARE_AGGREGATE_FOLDER = 'shares_aggregate'
+BALANCE_DETAIL_FOLDER = 'balance_detail'

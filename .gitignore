@@ -11,3 +11,8 @@ bin/
 include/
 .Python
 pip-selfcheck.json
+.venv/*
+.important.log
+.coverage
+celerybeat-schedule
+htmlcov
