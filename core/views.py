@@ -1,7 +1,9 @@
 import logging
 from datetime import datetime, timedelta
+from urllib.parse import urljoin
 from pydoc import locate
 from django.utils.timezone import get_current_timezone
+import requests
 
 from django.conf import settings
 from django.db.models import Q, Count, Sum, Max, Min
@@ -13,12 +15,12 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_HASH_RATE, DEFAULT_STOP_TIME_STAMP_HASH_RATE, \
-    LIMIT_NUMBER_CHUNK_HASH_RATE
+    LIMIT_NUMBER_CHUNK_HASH_RATE, API_KEY
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address
+    CONFIGURATION_KEY_TO_TYPE, Address, MinerIP
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from core.tasks import generate_and_send_transaction
-from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable
+from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable, node_request
 
 logger = logging.getLogger(__name__)
 
@@ -378,4 +380,83 @@ class HashRateViewSet(viewsets.GenericViewSet, mixins.RetrieveModelMixin):
                     "avg": int(sum_avg / prev_chunks),
                     "current": int(val)
                 })
+        return Response(response)
+
+
+class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
+    """
+    View set for get information of pool and network
+    """
+    def list(self, request, *args, **kwargs):
+        """
+        :param request:
+        :param args:
+        :param kwargs:
+        :return: {
+                "hash_rate": {
+                    "network": int,
+                    "pool": int
+                },
+                "miners": int,
+                "active_miners": int,
+                "price": int,
+                "blocks_in_hour": float
+            }
+        """
+        # Calculate hash_rate of network with getting last block between now time and past PERIOD_HASH_RATE
+        url = urljoin(ERGO_EXPLORER_ADDRESS, 'blocks')
+        query = {
+            'startDate': int(timezone.now().timestamp() - PERIOD_HASH_RATE) * 1000,
+            'endDate': int(timezone.now().timestamp()) * 1000
+        }
+        try:
+            data_explorer = requests.get(url, query)
+            if not 200 <= data_explorer.status_code <= 299:
+                raise requests.exceptions.RequestException(data_explorer.json())
+        except requests.exceptions.RequestException as e:
+            logger.error("Can not resolve response from Explorer")
+            logger.error(e)
+            return Response({'status': 'error', 'message': str(e)})
+        items = data_explorer.json().get('items')
+        difficulty_network = 0
+        for item in items:
+            difficulty_network += item.get('difficulty')
+        # Calculate HashRate of pool
+        pool_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=PERIOD_HASH_RATE))
+        # Number of miner in table Miner
+        count_miner = Miner.objects.count()
+        # Get blocks solved in past hour
+        shares = Share.objects.filter(
+            Q(created_at__range=(timezone.now() - timedelta(seconds=3600), timezone.now())) &
+            Q(status='solved')
+        ).values('transaction_id')
+        # Check should be there is transaction_id in the wallet
+        count = 0
+        for share in shares:
+            data_node = node_request('wallet/transactionById?id={}'.format(share['transaction_id']),
+                                     {
+                                         'accept': 'application/json',
+                                         'content-type': 'application/json',
+                                         'api_key': API_KEY
+                                     })
+            if data_node['status'] == 'success':
+                count += 1
+            else:
+                logger.debug("response of node api 'wallet/transactionById' {}".format(data_node['response']))
+        # Active Miner in past hour
+        active_miners_count = Miner.objects.filter(
+            minerip__updated_at__range=(timezone.now() - timedelta(seconds=3600), timezone.now())
+        ).distinct().count()
+        # Set value of response
+        response = {
+            "hash_rate": {
+                "network": int(difficulty_network/PERIOD_HASH_RATE),
+                "pool": pool_hash_rate['total_hash_rate']
+            },
+            "miners": count_miner,
+            "active_miners": active_miners_count,
+            "price": 0,
+            "blocks_in_hour": count / 3600
+        }
+
         return Response(response)
