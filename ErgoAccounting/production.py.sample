@@ -106,3 +106,12 @@ AGGREGATE_ROOT_FOLDER = 'aggregation'
 SHARE_DETAIL_FOLDER = 'shares_detail'
 SHARE_AGGREGATE_FOLDER = 'shares_aggregate'
 BALANCE_DETAIL_FOLDER = 'balance_detail'
+
+# Total period calculate hash rate 1-Day (second)
+TOTAL_PERIOD_HASH_RATE = 24 * 60 * 60
+# Period calculate hash rate 30 minute (second)
+PERIOD_HASH_RATE = 30 * 60
+# Default stop timestamp if not set stop
+DEFAULT_STOP_TIME_STAMP_HASH_RATE = 50 * 60 * 60
+# Number of Chunk
+LIMIT_NUMBER_CHUNK_HASH_RATE = 1000
