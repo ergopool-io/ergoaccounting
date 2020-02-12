@@ -388,6 +388,30 @@ class PropFunctionTest(TestCase):
             balances = self.get_share_balance(share)
             self.assertEqual(balances, {'0': int(19.5e9), '1': int(26.0e9), '2': int(19.5e9)})
 
+    def test_prop_called_multiple_with_different_shares(self):
+        """
+        in this case we call prop function 5 times. after first call, miners shares changes
+        so in second call balances must be changed
+        :return:
+        """
+        Configuration.objects.create(key='MAX_REWARD', value=int(65e9))
+        share = self.shares[34]
+        self.prop(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': int(19.5e9), '1': int(26.0e9), '2': int(19.5e9)})
+
+        cur = Share.objects.create(miner=Miner.objects.get(public_key='1'), status='valid', difficulty=10000)
+        cur.created_at = share.created_at - timedelta(seconds=1)
+        cur.save()
+        self.prop(share)
+        cur_balances = self.get_share_balance(share)
+        self.assertEqual(cur_balances, {'0': int(9.75e9), '1': int(45.5e9), '2': int(9.75e9)})
+        for miner_id in cur_balances:
+            balance = Balance.objects.filter(miner__public_key=miner_id,
+                                             balance=cur_balances[miner_id] - balances[miner_id],
+                                             status='immature', share=share)
+            self.assertEqual(balance.count(), 1)
+
     def test_prop_with_first_solved_share_with_fee(self):
         """
         in this scenario we call prop function with first solved share in database.
@@ -489,6 +513,7 @@ class PropFunctionTest(TestCase):
         :return:
         """
         Configuration.objects.all().delete()
+        Balance.objects.all().delete()
         # delete all miners objects. all related objects are deleted
         for miner in self.miners:
             miner.delete()
@@ -812,7 +837,8 @@ class PPLNSFunctionTest(TestCase):
         self.shares = shares
 
     def get_share_balance(self, sh):
-        return dict(Balance.objects.filter(share=sh).values_list('miner__public_key').annotate(Sum('balance')))
+        return dict(Balance.objects.filter(share=sh, status='immature').values_list('miner__public_key').annotate(
+            Sum('balance')))
 
     def test_pplns_with_invalid_share(self):
         """
@@ -854,6 +880,31 @@ class PPLNSFunctionTest(TestCase):
             self.PPLNS(share)
             balances = self.get_share_balance(share)
             self.assertEqual(balances, {'0': int(19.5e9), '1': int(26.0e9), '2': int(19.5e9)})
+
+    def test_pplns_called_multiple_with_different_shares(self):
+        """
+        in this case we call prop function 5 times. after first call, miners shares changes
+        so in second call balances must be changed
+        :return:
+        """
+        Configuration.objects.create(key='MAX_REWARD', value=int(65e9))
+        share = self.shares[44]
+        self.PPLNS(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': int(19.5e9), '1': int(26.0e9), '2': int(19.5e9)})
+
+        cur = Share.objects.create(miner=Miner.objects.get(public_key='1'), status='valid', difficulty=10000)
+        cur.created_at = share.created_at - timedelta(seconds=1)
+        cur.save()
+        Configuration.objects.filter(key="PPLNS_N").update(value='11')
+        self.PPLNS(share)
+        cur_balances = self.get_share_balance(share)
+        self.assertEqual(cur_balances, {'0': int(9.75e9), '1': int(45.5e9), '2': int(9.75e9)})
+        for miner_id in cur_balances:
+            balance = Balance.objects.filter(miner__public_key=miner_id,
+                                             balance=cur_balances[miner_id] - balances[miner_id],
+                                             status='immature', share=share)
+            self.assertEqual(balance.count(), 1)
 
     def test_pplns_with_lower_amount_of_shares_with_fee(self):
         """
@@ -1148,8 +1199,9 @@ class TransactionGenerateTestCase(TestCase):
 
         # create output for each miner
         self.outputs = [(pk, int((i + 1) * 1e10)) for i, pk in enumerate(pks)]
-        self.pending_balances = [Balance(miner=Miner.objects.get(public_key=x[0]), balance=-x[1], status="pending_withdrawal") for x in
-                                 self.outputs]
+        self.pending_balances = [
+            Balance(miner=Miner.objects.get(public_key=x[0]), balance=-x[1], status="pending_withdrawal") for x in
+            self.outputs]
         for pk, _ in self.outputs:
             Address.objects.create(address_miner=Miner.objects.get(public_key=pk), category='withdraw', address=pk)
 
@@ -1433,7 +1485,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([(self.miners[0].public_key, int(180e9), max_id + 1)])])
 
-        self.assertEqual(Balance.objects.filter(miner=self.miners[0], balance=int(-180e9), status="pending_withdrawal").count(), 1)
+        self.assertEqual(
+            Balance.objects.filter(miner=self.miners[0], balance=int(-180e9), status="pending_withdrawal").count(), 1)
 
     def test_all_miner_below_default_threshold_one_explicit_threshold(self, mocked_generate_txs):
         """
@@ -1447,7 +1500,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([(miner.public_key, int(80e9), max_id + 1)])])
 
-        self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(), 1)
+        self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(),
+                         1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
 
     def test_all_miner_below_default_threshold_two_explicit_threshold(self, mocked_generate_txs):
@@ -1466,7 +1520,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         mocked_generate_txs.assert_has_calls([call([(miner1.public_key, int(80e9), max_id + 1),
                                                     (miner2.public_key, int(80e9), max_id + 2)])])
         for miner in [miner1, miner2]:
-            self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(), 1)
+            self.assertEqual(
+                Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(), 1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 2)
 
     def test_all_miners_but_one_below_default_threshold_two_explicit_threshold_one_not_above(self, mocked_generate_txs):
@@ -1484,7 +1539,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([(miner1.public_key, int(80e9), max_id + 1)])])
 
-        self.assertEqual(Balance.objects.filter(miner=miner1, balance=int(-80e9), status="pending_withdrawal").count(), 1)
+        self.assertEqual(Balance.objects.filter(miner=miner1, balance=int(-80e9), status="pending_withdrawal").count(),
+                         1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
 
     def test_all_miners_but_one_below_default_one_above_default_below_explicit(self, mocked_generate_txs):
@@ -1515,7 +1571,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         mocked_generate_txs.assert_has_calls([call(outputs)])
 
         for miner in self.miners[1:]:
-            self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-110e9), status="pending_withdrawal").count(), 1)
+            self.assertEqual(
+                Balance.objects.filter(miner=miner, balance=int(-110e9), status="pending_withdrawal").count(), 1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), len(self.miners) - 1)
 
     def test_all_miners_above_default_but_one_no_balance(self, mocked_generate_txs):
@@ -1533,7 +1590,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         mocked_generate_txs.assert_has_calls([call(outputs)])
 
         for miner in self.miners[1:]:
-            self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-110e9), status="pending_withdrawal").count(), 1)
+            self.assertEqual(
+                Balance.objects.filter(miner=miner, balance=int(-110e9), status="pending_withdrawal").count(), 1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), len(self.miners) - 1)
 
     def test_no_balance(self, mocked_generate_txs):
@@ -1741,7 +1799,8 @@ class MinerViewTestCase(TestCase):
         mocked_generate_and_send_txs.delay.assert_has_calls(
             [call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
 
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-60e9)).count(), 1)
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-60e9)).count(),
+                         1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
 
     @patch('core.views.generate_and_send_transaction')
@@ -1761,7 +1820,8 @@ class MinerViewTestCase(TestCase):
         mocked_generate_and_send_txs.delay.assert_has_calls(
             [call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
 
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-60e9)).count(), 1)
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-60e9)).count(),
+                         1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 2)
 
     @patch('core.views.generate_and_send_transaction')
@@ -1779,7 +1839,8 @@ class MinerViewTestCase(TestCase):
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
         mocked_generate_and_send_txs.delay.assert_has_calls(
             [call([(miner.public_key, int(80e9), max_id)], subtract_fee=True)])
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-80e9)).count(), 1)
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-80e9)).count(),
+                         1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
 
     def tearDown(self):
@@ -1797,6 +1858,18 @@ class ImmatureToMatureTestCase(TestCase):
     Test class for immature_to_mature function
     """
     CURRENT_HEIGHT = 20000
+
+    def mocked_reward_algorithm_do_nothing(*args, **kwargs):
+        pass
+
+    def mocked_reward_algorithm(*args, **kwargs):
+        share = args[0]
+        miners = Miner.objects.all()
+        for miner in miners[:5]:
+            Balance.objects.create(miner=miner, share=share, status='immature', balance=-10)
+
+        for miner in miners[5:]:
+            Balance.objects.create(miner=miner, share=share, status='immature', balance=10)
 
     def mocked_node_request(*args, **kwargs):
         """
@@ -1816,6 +1889,17 @@ class ImmatureToMatureTestCase(TestCase):
             return {
                 'response': {'numConfirmations': num_confirmation},
                 'status': 'success'
+            }
+
+        if 'chainslice' in url.lower():
+            params = kwargs['params']
+            # min_h = int(params['fromHeight'])
+            # max_h = int(params['toHeight'])
+            headers = json.loads(open('core/data_mock_testing/headers.json').read())
+            return {
+                'status': 'success',
+                # 'response': headers[min_h - 1:max_h]
+                'response': headers
             }
 
         return {
@@ -1852,28 +1936,28 @@ class ImmatureToMatureTestCase(TestCase):
             block_height = self.CURRENT_HEIGHT - num_confirmation
             tx_id = '_'.join([random_string(), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
-                                 block_height=block_height, status='valid')
+                                 block_height=block_height, status='valid', parent_id='1')
 
             # confirmed shares
             num_confirmation = CONFIRMATION_LENGTH + 10
             block_height = self.CURRENT_HEIGHT - num_confirmation
             tx_id = '_'.join([random_string(), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
-                                 block_height=block_height, status='solved')
+                                 block_height=block_height, status='solved', parent_id='1')
 
             # confirmed just now
             num_confirmation = CONFIRMATION_LENGTH
             block_height = self.CURRENT_HEIGHT - num_confirmation
             tx_id = '_'.join([random_string(), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
-                                 block_height=block_height, status='solved')
+                                 block_height=block_height, status='solved', parent_id='1')
 
             # unconfirmed shares
             num_confirmation = CONFIRMATION_LENGTH - 10
             block_height = self.CURRENT_HEIGHT - num_confirmation
             tx_id = '_'.join([random_string(), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
-                                 block_height=block_height, status='solved')
+                                 block_height=block_height, status='solved', parent_id='1')
 
         # by default all shares have immature balances for each miner
         for share in Share.objects.all():
@@ -1898,7 +1982,8 @@ class ImmatureToMatureTestCase(TestCase):
         }
 
         immature_to_mature()
-        for balance in Balance.objects.all():
+        for balance_id in balances_to_status.keys():
+            balance = Balance.objects.get(id=balance_id)
             if balance.share is None or balance.share.id not in confirmed_shares:
                 self.assertEqual(balance.status, balances_to_status[balance.id])
 
@@ -1910,10 +1995,12 @@ class ImmatureToMatureTestCase(TestCase):
                     self.assertEqual(balance.status, balances_to_status[balance.id])
 
     @patch('core.tasks.node_request', side_effect=mocked_node_request)
-    def test_20_shares_possible_15_confirmed(self, mocked_node_request):
+    @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm_do_nothing)
+    def test_some_shares_next_ids_present(self, mocked_node_request, logic):
         """
         20 shares have immature balances and their block_height is less than the threshold
         15 of these shares are confirmed
+        some confirmed share has issues because its next ids are present in blockchain
         """
         current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
         CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
@@ -1931,12 +2018,225 @@ class ImmatureToMatureTestCase(TestCase):
                                                                block_height__lte=(current_height - CONFIRMATION_LENGTH),
                                                                status='solved').distinct() if
                             x.id not in cur_unconfirmed]
+        conf = Share.objects.get(id=confirmed_shares[0])
+        conf.next_ids = ['1']
+        conf.save()
+        val = Share.objects.filter(status='valid').first()
+        val.next_ids = ['1']
+        val.save()
+        conf_balances = [b.id for b in Balance.objects.filter(share=conf, status='immature')]
+
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        total_bal_count = Balance.objects.all().count()
+        immature_to_mature()
+        for id in conf_balances:
+            b = Balance.objects.get(id=id)
+            self.assertEqual(Balance.objects.filter(miner=b.miner, status='mature',
+                                                    balance=-b.balance, share=conf).count(), 1)
+
+        self.assertEqual(Balance.objects.all().count(), total_bal_count + len(conf_balances))
+
+        conf = Share.objects.get(id=conf.id)
+        self.assertTrue(conf.is_orphaned)
+        val = Share.objects.get(id=val.id)
+        self.assertTrue(val.is_orphaned)
+
+        for balance_id in balances_to_status.keys():
+            balance = Balance.objects.get(id=balance_id)
+            if balance.share is None or balance.share.id not in confirmed_shares:
+                self.assertEqual(balance.status, balances_to_status[balance.id])
+
+            else:
+                if balances_to_status[balance.id] == "immature":
+                    self.assertEqual(balance.status, "mature")
+
+                else:
+                    self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm_do_nothing)
+    def test_reward_algorithm_called_for_confirmed(self, logic, node_request):
+        """
+        20 shares have immature balances and their block_height is less than the threshold
+        15 of these shares are confirmed
+        reward algorithm must be called for ok and confirmed solved shares
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        cur_unconfirmed = Share.objects.filter(balance__status='immature',
+                                               block_height=(current_height - CONFIRMATION_LENGTH),
+                                               status='solved').distinct()[:5]
+        for share in cur_unconfirmed:
+            num_confirmed = int(share.transaction_id.split('_')[-1])
+            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 1)])
+            share.save()
+
+        cur_unconfirmed = [x.id for x in cur_unconfirmed]
+
+        confirmed_shares_id = [x.id for x in Share.objects.filter(balance__status='immature',
+                                                                  block_height__lte=(
+                                                                              current_height - CONFIRMATION_LENGTH),
+                                                                  status='solved').distinct() if
+                               x.id not in cur_unconfirmed]
+
+        confirmed_shares = [x for x in Share.objects.filter(balance__status='immature',
+                                                            block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                                            status='solved').distinct() if
+                            x.id not in cur_unconfirmed]
+        conf = Share.objects.get(id=confirmed_shares_id[0])
+        conf.next_ids = ['1']
+        conf.save()
+        conf_balances = [b.id for b in Balance.objects.filter(share=conf, status='immature')]
+
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        total_bal_count = Balance.objects.all().count()
+        immature_to_mature()
+        for id in conf_balances:
+            b = Balance.objects.get(id=id)
+            self.assertEqual(Balance.objects.filter(miner=b.miner, status='mature',
+                                                    balance=-b.balance, share=conf).count(), 1)
+
+        self.assertEqual(Balance.objects.all().count(), total_bal_count + len(conf_balances))
+
+        conf = Share.objects.get(id=conf.id)
+        self.assertTrue(conf.is_orphaned)
+
+        logic.assert_has_calls([call(share) for share in confirmed_shares if share.id != conf.id])
+
+        for balance_id in balances_to_status.keys():
+            balance = Balance.objects.get(id=balance_id)
+            if balance.share is None or balance.share.id not in confirmed_shares_id:
+                self.assertEqual(balance.status, balances_to_status[balance.id])
+
+            else:
+                if balances_to_status[balance.id] == "immature":
+                    self.assertEqual(balance.status, "mature")
+
+                else:
+                    self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm)
+    def test_reward_algorithm_results_must_be_mature(self, logic, node_request):
+        """
+        20 shares have immature balances and their block_height is less than the threshold
+        15 of these shares are confirmed
+        balances created in reward algorithm must be converted to mature too
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        cur_unconfirmed = Share.objects.filter(balance__status='immature',
+                                               block_height=(current_height - CONFIRMATION_LENGTH),
+                                               status='solved').distinct()[:5]
+        for share in cur_unconfirmed:
+            num_confirmed = int(share.transaction_id.split('_')[-1])
+            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 1)])
+            share.save()
+
+        cur_unconfirmed = [x.id for x in cur_unconfirmed]
+
+        confirmed_shares_id = [x.id for x in Share.objects.filter(balance__status='immature',
+                                                                  block_height__lte=(
+                                                                          current_height - CONFIRMATION_LENGTH),
+                                                                  status='solved').distinct() if
+                               x.id not in cur_unconfirmed]
+
+        confirmed_shares = [x for x in Share.objects.filter(balance__status='immature',
+                                                            block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                                            status='solved').distinct() if
+                            x.id not in cur_unconfirmed]
         balances_to_status = {
             balance.id: balance.status for balance in Balance.objects.all()
         }
 
         immature_to_mature()
-        for balance in Balance.objects.all():
+
+        logic.assert_has_calls([call(share) for share in confirmed_shares if share.id])
+
+        for share in confirmed_shares:
+            miners = Miner.objects.all()
+            for miner in miners[:5]:
+                bal = Balance.objects.filter(miner=miner, share=share, balance=-10)
+                self.assertEqual(bal.count(), 1)
+                self.assertEqual(bal.first().status, 'mature')
+                self.assertTrue(bal.first().is_orphaned)
+
+            for miner in miners[5:]:
+                bal = Balance.objects.filter(miner=miner, share=share, balance=10)
+                self.assertEqual(bal.count(), 1)
+                self.assertEqual(bal.first().status, 'mature')
+                self.assertTrue(not bal.first().is_orphaned)
+
+        for balance_id in balances_to_status.keys():
+            balance = Balance.objects.get(id=balance_id)
+            if balance.share is None or balance.share.id not in confirmed_shares_id:
+                self.assertEqual(balance.status, balances_to_status[balance.id])
+
+            else:
+                if balances_to_status[balance.id] == "immature":
+                    self.assertEqual(balance.status, "mature")
+
+                else:
+                    self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm_do_nothing)
+    def test_some_shares_parent_id_not_present(self, mocked_node_request, logic):
+        """
+        20 shares have immature balances and their block_height is less than the threshold
+        15 of these shares are confirmed
+        some confirmed share has issues because its parent id is not present in the blockchain
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        cur_unconfirmed = Share.objects.filter(balance__status='immature',
+                                               block_height=(current_height - CONFIRMATION_LENGTH),
+                                               status='solved').distinct()[:5]
+        for share in cur_unconfirmed:
+            num_confirmed = int(share.transaction_id.split('_')[-1])
+            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 1)])
+            share.save()
+
+        cur_unconfirmed = [x.id for x in cur_unconfirmed]
+
+        confirmed_shares = [x.id for x in Share.objects.filter(balance__status='immature',
+                                                               block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                                               status='solved').distinct() if
+                            x.id not in cur_unconfirmed]
+        conf = Share.objects.get(id=confirmed_shares[0])
+        conf.parent_id = '1000'
+        conf.save()
+        val = Share.objects.filter(status='valid').first()
+        val.parent_id = '1000'
+        val.save()
+        conf_balances = [b.id for b in Balance.objects.filter(share=conf, status='immature')]
+
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        total_bal_count = Balance.objects.all().count()
+        immature_to_mature()
+        for id in conf_balances:
+            b = Balance.objects.get(id=id)
+            self.assertEqual(Balance.objects.filter(miner=b.miner, status='mature',
+                                                    balance=-b.balance, share=conf).count(), 1)
+
+        self.assertEqual(Balance.objects.all().count(), total_bal_count + len(conf_balances))
+
+        conf = Share.objects.get(id=conf.id)
+        self.assertTrue(conf.is_orphaned)
+        val = Share.objects.get(id=val.id)
+        self.assertTrue(val.is_orphaned)
+
+        for balance_id in balances_to_status.keys():
+            balance = Balance.objects.get(id=balance_id)
             if balance.share is None or balance.share.id not in confirmed_shares:
                 self.assertEqual(balance.status, balances_to_status[balance.id])
 
@@ -2460,8 +2760,10 @@ class AggregateTestCase(TestCase):
             self.assertEqual(Balance.objects.filter(miner=miner, status="mature", balance=int(60e9)).count(), 1)
             self.assertEqual(Balance.objects.filter(miner=miner, status="withdraw", balance=int(-20e9)).count(), 1)
 
-        self.assertEqual(Balance.objects.filter(miner=Miner.objects.all()[0], status="mature", balance=int(160e9)).count(), 1)
-        self.assertEqual(Balance.objects.filter(miner=Miner.objects.all()[0], status="withdraw", balance=int(-70e9)).count(), 1)
+        self.assertEqual(
+            Balance.objects.filter(miner=Miner.objects.all()[0], status="mature", balance=int(160e9)).count(), 1)
+        self.assertEqual(
+            Balance.objects.filter(miner=Miner.objects.all()[0], status="withdraw", balance=int(-70e9)).count(), 1)
 
         for solved in self.solved[2:]:
             for miner in Miner.objects.all():
@@ -2532,7 +2834,8 @@ class AggregateTestCase(TestCase):
         b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(-50e9), status="pending_withdrawal")
         Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
 
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at, status__in=["mature", "withdraw"]):
+        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at,
+                                              status__in=["mature", "withdraw"]):
             balance_detail_content.append(str(BalanceSerializer(balance).data))
 
         aggregate()
