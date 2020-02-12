@@ -151,9 +151,9 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
         return Response(config, status=status.HTTP_200_OK)
 
 
-class DashboardView(viewsets.GenericViewSet,
-                    mixins.ListModelMixin,
-                    mixins.RetrieveModelMixin):
+class UserApiViewSet(viewsets.GenericViewSet,
+                     mixins.ListModelMixin,
+                     mixins.RetrieveModelMixin):
 
     def get_queryset(self):
         return None
@@ -179,8 +179,11 @@ class DashboardView(viewsets.GenericViewSet,
             first_share=Min('created_at')
         )
         last_solved_timestamp = times.get("last_solved") or times.get("first_share") or datetime.now()
-        # Set the response to be all miners or just one with specified pk
-        miners = Miner.objects.filter(public_key=pk) if pk else Miner.objects
+        # Set the response to be all miners or just one with specified public_key or address of miner
+        miners = Miner.objects.filter(
+            Q(public_key=pk) |
+            Q(address__address=pk)
+        ) if pk else Miner.objects
 
         # Total shares count of this round
         total_count = Share.objects.filter(created_at__gt=last_solved_timestamp).aggregate(
@@ -196,26 +199,31 @@ class DashboardView(viewsets.GenericViewSet,
             mature=Sum('share__balance__balance', filter=Q(share__balance__status="mature")),
             withdraw=Sum('share__balance__balance', filter=Q(share__balance__status="withdraw")),
         )
-        miners_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME))
+        public_key_hash_rate = round_shares[0]['public_key'] if pk else None
+        miners_hash_rate = compute_hash_rate(
+            timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME),
+            pk=public_key_hash_rate
+        )
         logger.info('Current hash rate: {}'.format(miners_hash_rate))
         miners_info = dict()
-        for item in round_shares:
-            miners_info[item['public_key']] = dict()
-            miners_info[item['public_key']]['round_valid_shares'] = item['valid_shares']
-            miners_info[item['public_key']]['round_invalid_shares'] = item['invalid_shares']
-            miners_info[item['public_key']]['immature'] = item['immature'] if item['immature'] else 0
-            miners_info[item['public_key']]['mature'] = item['mature'] if item['mature'] else 0
-            miners_info[item['public_key']]['withdraw'] = item['withdraw'] if item['withdraw'] else 0
-            if item['public_key'] in miners_hash_rate:
-                miners_info[item['public_key']]['hash_rate'] = miners_hash_rate[item['public_key']]['hash_rate']
-
         response = {
             'round_valid_shares': total_count.get("valid", 0),
             'round_invalid_shares': total_count.get("invalid", 0),
             'timestamp': last_solved_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
             'hash_rate': miners_hash_rate['total_hash_rate'],
-            'users': miners_info
         }
+        if request.user.is_authenticated:
+            for item in round_shares:
+                miners_info[pk or item['public_key']] = dict()
+                miners_info[pk or item['public_key']]['round_valid_shares'] = item['valid_shares']
+                miners_info[pk or item['public_key']]['round_invalid_shares'] = item['invalid_shares']
+                miners_info[pk or item['public_key']]['immature'] = item['immature'] if item['immature'] else 0
+                miners_info[pk or item['public_key']]['mature'] = item['mature'] if item['mature'] else 0
+                miners_info[pk or item['public_key']]['withdraw'] = item['withdraw'] if item['withdraw'] else 0
+                if item['public_key'] in miners_hash_rate:
+                    miners_info[pk or item['public_key']]['hash_rate'] = miners_hash_rate[item['public_key']]['hash_rate']
+            response['users'] = miners_info
+
         return Response(response)
 
 

@@ -232,7 +232,7 @@ def compute_hash_rate(by, to=timezone.now(), pk=None):
         miners[share['miner__public_key']]['hash_rate'] = int((share['difficulty__sum'] / time) + 1)
         total_hash_rate = total_hash_rate + share['difficulty__sum'] if not pk else 0
 
-    miners.update({'total_hash_rate': int((total_hash_rate / time) + 1)}) if not pk else None
+    miners.update({'total_hash_rate': int((total_hash_rate / time) + 1)})
     return miners
 
 
