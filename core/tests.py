@@ -9,6 +9,9 @@ from urllib.parse import urlparse, urljoin
 
 from django.db.models import Sum, Max
 from django.test import TestCase, Client, TransactionTestCase, override_settings
+from django.contrib.auth.models import User
+from django.test.client import RequestFactory
+from rest_framework.test import APIClient
 from django.utils import timezone
 from mock import patch, call
 from rest_framework import status
@@ -519,9 +522,13 @@ class PropFunctionTest(TestCase):
             miner.delete()
 
 
-class DashboardTestCase(TestCase):
+class UserApiTestCase(TestCase):
     def setUp(self) -> None:
-        self.client = Client()
+        self.factory = RequestFactory()
+        User.objects.create_user(username='test', password='test')
+
+        self.client = APIClient()
+        self.client.login(username='test', password='test')
 
         # Create two miner; abc and xyz
         miners = [
@@ -560,9 +567,9 @@ class DashboardTestCase(TestCase):
 
     def test_get_all(self):
         """
-        Purpose: Check if Dashboard view returns the correct info for all miners.
+        Purpose: Check if User Api view returns the correct info for all miners.
         Prerequisites: Nothing
-        Scenario: Sends a request to /dashboard/ and checks if response is correct
+        Scenario: Sends a request to /user/ and checks if response is correct
         Test Conditions:
         * status is 200
         * Content-Type is application/json
@@ -578,7 +585,8 @@ class DashboardTestCase(TestCase):
                     "round_invalid_shares": 0,
                     "immature": 300.0,
                     "mature": 300.0,
-                    "withdraw": 400.0
+                    "withdraw": 400.0,
+                    "hashrate": 1
                 },
                 'xyz': {
                     "round_valid_shares": 2,
@@ -590,7 +598,7 @@ class DashboardTestCase(TestCase):
             }
         }
         """
-        response = self.client.get('/dashboard/').json()
+        response = self.client.get('/user/').json()
         self.assertDictEqual(response, {
             'round_valid_shares': 4,
             'round_invalid_shares': 1,
@@ -616,9 +624,9 @@ class DashboardTestCase(TestCase):
 
     def test_get_specified_pk(self):
         """
-        Purpose: Check if Dashboard view returns the correct info for the specified miner (abc)
+        Purpose: Check if user view returns the correct info for the specified miner (abc)
         Prerequisites: Nothing
-        Scenario: Sends a request to /dashboard/abc and checks if response is correct for miner 'abc'
+        Scenario: Sends a request to /user/abc and checks if response is correct for miner 'abc'
         Test Conditions:
         * status is 200
         * Content-Type is application/json
@@ -636,7 +644,7 @@ class DashboardTestCase(TestCase):
             }
         }
         """
-        content = self.client.get('/dashboard/abc/')
+        content = self.client.get('/user/abc/')
         response = content.json()
         self.assertDictEqual(response, {
             'round_valid_shares': 4,
