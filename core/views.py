@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from pydoc import locate
+from django.utils.timezone import get_current_timezone
 
 from django.conf import settings
 from django.db.models import Q, Count, Sum, Max, Min
@@ -11,6 +12,8 @@ from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_HASH_RATE, DEFAULT_STOP_TIME_STAMP_HASH_RATE, \
+    LIMIT_NUMBER_CHUNK_HASH_RATE
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
@@ -303,3 +306,76 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
                                             subtract_fee=True)
         return Response({'message': 'withdrawal was successful.',
                          'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
+
+
+class HashRateViewSet(viewsets.GenericViewSet, mixins.RetrieveModelMixin):
+
+    def get_queryset(self):
+        pass
+
+    def retrieve(self, request, *args, **kwargs):
+        return self.get_response(request, kwargs.get("pk").lower())
+
+    def list(self, request, *args, **kwargs):
+        return Response([])
+
+    def get_response(self, request, pk=None):
+        """
+        Returns Average and current hash_rate
+
+        :param request:
+        :param pk:
+        :return:
+        """
+        # Get query_params
+        query = self.request.query_params
+        # Set start period for get data from data_base if there is not start param set time now mines
+        # DEFAULT_STOP_TIME_STAMP_HASH_RATE
+        start = int(query.get('start') or timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_HASH_RATE)
+        start_frame = int(start / PERIOD_HASH_RATE)
+        # Set end period for get data from data_base if there is not stop param set time now
+        stop = int(query.get('stop') or timezone.now().timestamp())
+        # Check number of chunk should not bigger than LIMIT_NUMBER_CHUNK_HASH_RATE
+        if (stop - start) / PERIOD_HASH_RATE >= LIMIT_NUMBER_CHUNK_HASH_RATE:
+            stop = min(stop, start + (LIMIT_NUMBER_CHUNK_HASH_RATE * PERIOD_HASH_RATE))
+        stop_frame = int(stop / PERIOD_HASH_RATE)
+        prev_chunks = int(TOTAL_PERIOD_HASH_RATE / PERIOD_HASH_RATE)
+        tz = get_current_timezone()
+        logger.info('computing hash rate for pk: {}'.format(pk))
+        shares = Share.objects.filter(
+            Q(miner__public_key=pk) &
+            Q(created_at__gte=timezone.datetime.fromtimestamp(start - (prev_chunks + 1) * PERIOD_HASH_RATE,
+                                                              tz=tz)) &
+            Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz)) &
+            Q(status__in=['valid', 'solved'])
+        ).extra(
+            select={
+                'frame': 'Cast(EXTRACT(epoch from "core_share"."created_at")AS INTEGER) / {}'.format(
+                    str(PERIOD_HASH_RATE)
+                )
+            }
+        ).values('frame').annotate(sum=Sum('difficulty'))
+
+        shares = list(shares)
+        response = []
+        chunk = []
+        index = 0
+        # Sum of all difficulty shares in  the period
+        sum_avg = 0
+        # Calculate HashRate average and current
+        for i in range(start_frame - prev_chunks, stop_frame + 1):
+            if index < len(shares) and shares[index]['frame'] == i:
+                val = shares[index]['sum'] / PERIOD_HASH_RATE
+                index += 1
+            else:
+                val = 0
+            sum_avg += val
+            chunk.append(val)
+            if i >= start_frame:
+                sum_avg -= chunk.pop(0)
+                response.append({
+                    "timestamp": i * PERIOD_HASH_RATE,
+                    "avg": int(sum_avg / prev_chunks),
+                    "current": int(val)
+                })
+        return Response(response)
