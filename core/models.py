@@ -123,6 +123,7 @@ class Share(models.Model):
     miner_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='miner_addresses')
     lock_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='lock_addresses')
     withdraw_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='withdraw_addresses')
+    is_orphaned = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -152,6 +153,10 @@ class Balance(models.Model):
 
     def __str__(self):
         return '{}-{}'.format(str(self.miner), self.balance)
+
+    @property
+    def is_orphaned(self):
+        return self.status == 'mature' and self.balance < 0
 
 
 class AggregateShare(models.Model):
