@@ -98,7 +98,7 @@ app.conf.beat_schedule = {
     },
 }
 
-# aggregate parameters
+# aggregate parameters, please set with a confidence threshold
 KEEP_SHARES_WITH_DETAIL_NUM = 10
 KEEP_SHARES_AGGREGATION_NUM = 710
 KEEP_BALANCE_WITH_DETAIL_NUM = 720
