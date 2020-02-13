@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_HASH_RATE, DEFAULT_STOP_TIME_STAMP_HASH_RATE, \
     LIMIT_NUMBER_CHUNK_HASH_RATE, API_KEY, NUMBER_OF_LAST_INCOME
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address
+    CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, EXTRA_INFO_KEY_TYPE
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from core.tasks import generate_and_send_transaction
 from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable, node_request
@@ -479,6 +479,12 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
             minerip__updated_at__range=(timezone.now() - timedelta(seconds=3600), timezone.now())
         ).distinct().count()
         # Set value of response
+
+        price_btc = ExtraInfo.objects.filter(key='ERGO_PRICE_BTC').first()
+        price_usd = ExtraInfo.objects.filter(key='ERGO_PRICE_USD').first()
+        price_btc = None if price_btc is None else float(price_btc.value)
+        price_usd = None if price_usd is None else float(price_usd.value)
+
         response = {
             "hash_rate": {
                 "network": int(difficulty_network/PERIOD_HASH_RATE),
@@ -486,8 +492,12 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
             },
             "miners": count_miner,
             "active_miners": active_miners_count,
-            "price": 0,
+            "price": {
+                'btc': price_btc,
+                'usd': price_usd
+            },
             "blocks_in_hour": count / 3600
         }
 
         return Response(response)
+

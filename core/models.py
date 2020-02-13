@@ -8,6 +8,18 @@ from frozendict import frozendict
 
 logger = logging.getLogger(__name__)
 
+EXTRA_INFO_KEY_CHOICES = (
+    ('ERGO_PRICE_USD', 'price of ergo in USD'),
+    ('ERGO_PRICE_BTC', 'price of ergo in BTC')
+)
+
+EXTRA_INFO_KEY_TYPE = frozendict({
+    'ERGO_PRICE_USD': 'float',
+    'ERGO_PRICE_BTC': 'float'
+})
+
+
+
 CONFIGURATION_KEY_CHOICE = (
     # total reward of a round
     ("TOTAL_REWARD", "TOTAL_REWARD"),
@@ -223,3 +235,13 @@ class Configuration(models.Model):
 
     def __str__(self):
         return self.key + ":" + str(self.value)
+
+
+class ExtraInfo(models.Model):
+    key = models.CharField(max_length=255, choices=EXTRA_INFO_KEY_CHOICES, blank=False, unique=True)
+    value = models.CharField(max_length=255, blank=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.key + ": " + str(self.value)
