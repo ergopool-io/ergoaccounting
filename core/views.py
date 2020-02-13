@@ -15,9 +15,9 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_HASH_RATE, DEFAULT_STOP_TIME_STAMP_HASH_RATE, \
-    LIMIT_NUMBER_CHUNK_HASH_RATE, API_KEY
+    LIMIT_NUMBER_CHUNK_HASH_RATE, API_KEY, NUMBER_OF_LAST_INCOME
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address, MinerIP
+    CONFIGURATION_KEY_TO_TYPE, Address
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from core.tasks import generate_and_send_transaction
 from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable, node_request
@@ -154,9 +154,32 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
 class UserApiViewSet(viewsets.GenericViewSet,
                      mixins.ListModelMixin,
                      mixins.RetrieveModelMixin):
+    model = Miner
+    queryset = Miner.objects.all()
 
-    def get_queryset(self):
-        return None
+    def get_object(self):
+        """
+        get object from miner table
+        :return: miner input in url(public_key or address)
+        """
+        pk = self.kwargs.get('pk')
+        miner = Miner.objects.filter(Q(public_key=pk) | Q(address__address=pk)).distinct()
+        return miner
+
+    @action(detail=True, name='income')
+    def income(self, request, *args, **kwargs):
+        """
+        return last 1000 income of user as list
+        """
+        miner = self.get_object().first()
+        share = Share.objects.filter(status='solved').filter(
+            Q(miner=miner) &
+            Q(balance__status='immature') |
+            Q(balance__status='mature')
+        ).values('block_height').annotate(balance=Sum('balance__balance'))[:NUMBER_OF_LAST_INCOME]
+        logger.debug("Get income for miner {}".format(miner.public_key))
+        response = [{'height': obj['block_height'], 'balance': obj['balance']} for obj in share]
+        return Response(response)
 
     def list(self, request, *args, **kwargs):
         return self.get_response(request)
