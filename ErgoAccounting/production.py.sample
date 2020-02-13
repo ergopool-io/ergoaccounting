@@ -96,6 +96,11 @@ app.conf.beat_schedule = {
         'schedule': int(os.environ.get('PERIODIC_AGGREGATE_INTERVAL', 24 * 3600)),
         'args': ()
     },
+    'periodic_ergo_price': {
+        'task': 'core.tasks.get_ergo_price',
+        'schedule': int(os.environ.get('PERIODIC_GET_ERGO_PRICE', 3600)),
+        'args': ()
+    },
 }
 
 # aggregate parameters, please set with a confidence threshold
