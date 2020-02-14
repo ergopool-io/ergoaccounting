@@ -75,7 +75,7 @@ LOGGING = {
 }
 
 # set your approprate broker url, e.g, rabbitmq or redis
-broker_url = os.environ.get("BROKER_URL")
+CELERY_BROKER_URL = os.environ.get("BROKER_URL")
 #'amqp://guest:guest@localhost:5672//'
 
 # for interval of the periodic task PERIODIC_WITHDRAWAL_INTERVAL should be set
@@ -95,6 +95,11 @@ app.conf.beat_schedule = {
     'periodic_aggregate': {
         'task': 'core.tasks.aggregate',
         'schedule': int(os.environ.get('PERIODIC_AGGREGATE_INTERVAL', 24 * 3600)),
+        'args': ()
+    },
+    'periodic_ergo_price': {
+        'task': 'core.tasks.get_ergo_price',
+        'schedule': int(os.environ.get('PERIODIC_GET_ERGO_PRICE', 3600)),
         'args': ()
     },
 }
