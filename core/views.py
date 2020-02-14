@@ -235,7 +235,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
             'timestamp': last_solved_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
             'hash_rate': miners_hash_rate['total_hash_rate'],
         }
-        if request.user.is_authenticated:
+        if request.user.is_authenticated or pk:
             for item in round_shares:
                 miners_info[pk or item['public_key']] = dict()
                 miners_info[pk or item['public_key']]['round_valid_shares'] = item['valid_shares']
