@@ -1,7 +1,6 @@
 from django.db.models import Count, Q, Sum
 from django.db import transaction
 
-from ErgoAccounting.production import API_KEY, NODE_ADDRESS
 from .models import Share, Balance, Configuration, Address
 from django.utils import timezone
 from urllib.parse import urljoin
@@ -16,6 +15,8 @@ logger = logging.getLogger(__name__)
 ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
 MAX_PAGINATION_SIZE = getattr(settings, "MAX_PAGINATION_SIZE")
 DEFAULT_PAGINATION_SIZE = getattr(settings, "DEFAULT_PAGINATION_SIZE")
+API_KEY = getattr(settings, "API_KEY")
+NODE_ADDRESS = getattr(settings, "NODE_ADDRESS")
 
 
 class RewardAlgorithm(metaclass=abc.ABCMeta):
@@ -76,8 +77,8 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
             return class_()
 
         except:
-            logger.error('Defined reward algorithm in configuration is not valid, {}' .format(algorithm))
-            raise ValueError('Defined reward algorithm in configuration is not valid, {}' .format(algorithm))
+            logger.error('Defined reward algorithm in configuration is not valid, {}'.format(algorithm))
+            raise ValueError('Defined reward algorithm in configuration is not valid, {}'.format(algorithm))
 
     def should_run_reward_algorithm(self, share):
         """
