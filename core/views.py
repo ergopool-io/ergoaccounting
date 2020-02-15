@@ -62,25 +62,29 @@ class ShareView(viewsets.GenericViewSet,
         _status = serializer.validated_data['status']
         rep_share = Share.objects.filter(share=_share)
 
-        miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
-                                                      address_miner=miner, category='miner')[0]
-        lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
-                                                     address_miner=miner, category='lock')[0]
-        withdraw_address = Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
-                                                         address_miner=miner, category='withdraw')[0]
-        # updating updated_at field
-        miner_address.save()
-        lock_address.save()
-        withdraw_address.save()
-
         if not rep_share:
             logger.info('New share, saving.')
-            serializer.save(miner=miner, miner_address=miner_address,
-                            lock_address=lock_address, withdraw_address=withdraw_address)
+            if _status in ["solved", "valid"]:
+                miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
+                                                              address_miner=miner, category='miner')[0]
+                lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
+                                                             address_miner=miner, category='lock')[0]
+                withdraw_address = \
+                    Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
+                                                  address_miner=miner, category='withdraw')[0]
+                # updating updated_at field
+                miner_address.save()
+                lock_address.save()
+                withdraw_address.save()
+                serializer.save(miner=miner, withdraw_address=withdraw_address, miner_address=miner_address,
+                                lock_address=lock_address)
+
+            else:
+                serializer.save(miner=miner, withdraw_address=None, miner_address=None, lock_address=None)
+
         else:
             logger.info('Repetitious share, saving.')
-            serializer.save(status="repetitious", miner=miner, miner_address=miner_address,
-                            lock_address=lock_address, withdraw_address=withdraw_address)
+            serializer.save(status="repetitious", miner=miner)
             _status = "repetitious"
         if _status == "solved":
             logger.info('Solved share, saving.')
@@ -312,7 +316,8 @@ class UserApiViewSet(viewsets.GenericViewSet,
                 miners_info[pk or item['public_key']]['mature'] = item['mature'] if item['mature'] else 0
                 miners_info[pk or item['public_key']]['withdraw'] = item['withdraw'] if item['withdraw'] else 0
                 if item['public_key'] in miners_hash_rate:
-                    miners_info[pk or item['public_key']]['hash_rate'] = miners_hash_rate[item['public_key']]['hash_rate']
+                    miners_info[pk or item['public_key']]['hash_rate'] = miners_hash_rate[item['public_key']][
+                        'hash_rate']
             response['users'] = miners_info
 
         return Response(response)
@@ -381,7 +386,8 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
         TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
         miner = self.get_object()
         # balances with "mature", "withdraw" and "pending_withdrawal" status
-        total = Balance.objects.filter(miner=miner, status__in=['mature', 'withdraw', 'pending_withdrawal']).aggregate(Sum('balance')).get('balance__sum')
+        total = Balance.objects.filter(miner=miner, status__in=['mature', 'withdraw', 'pending_withdrawal']).aggregate(
+            Sum('balance')).get('balance__sum')
 
         requested_amount = request.data.get('withdraw_amount')
         try:
@@ -486,6 +492,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     """
     View set for get information of pool and network
     """
+
     def list(self, request, *args, **kwargs):
         """
         :param request:
