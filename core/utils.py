@@ -1,3 +1,4 @@
+from celery.schedules import crontab
 from django.db.models import Count, Q, Sum
 from django.db import transaction
 
@@ -76,8 +77,8 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
             return class_()
 
         except:
-            logger.error('Defined reward algorithm in configuration is not valid, {}' .format(algorithm))
-            raise ValueError('Defined reward algorithm in configuration is not valid, {}' .format(algorithm))
+            logger.error('Defined reward algorithm in configuration is not valid, {}'.format(algorithm))
+            raise ValueError('Defined reward algorithm in configuration is not valid, {}'.format(algorithm))
 
     def should_run_reward_algorithm(self, share):
         """
@@ -369,3 +370,14 @@ def get_miner_payment_address(miner):
         return address.address
 
     return None
+
+
+def parse_cron_tab(cron_format, default):
+    try:
+        parts = cron_format.split()
+        if len(parts) < 5:
+            return default
+        return crontab(minute=parts[0], hour=parts[1], day_of_week=parts[2],
+                       day_of_month=parts[3], month_of_year=parts[4])
+    except:
+        return default

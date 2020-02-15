@@ -3,6 +3,7 @@ from ErgoAccounting.celery import app
 
 # # Database
 # # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
+from core.utils import parse_cron_tab
 
 DATABASES = {
     'default': {
@@ -78,28 +79,31 @@ LOGGING = {
 CELERY_BROKER_URL = os.environ.get("BROKER_URL")
 #'amqp://guest:guest@localhost:5672//'
 
-# for interval of the periodic task PERIODIC_WITHDRAWAL_INTERVAL should be set
-# default interval is 24h, it is also possible to change the crontime to a
-# specific time in day, e.g, 00:00am
+# for interval of the periodic tasks should be set intervals should be set by env; the format is (m h d dM MY), i.e.,
+# minute, hour, day of week, day of month, month of year
+# some examples:
+# "* * * * *" --> execute every minute
+# "0 0 * * *" --> execute at midnight
+# "0 */3 * * *" --> execute every three hours: 3am, 6am, 9am, noon, 3pm, 6pm, 9pm.
 app.conf.beat_schedule = {
     'periodic_withdrawal': {
         'task': 'core.tasks.periodic_withdrawal',
-        'schedule': int(os.environ.get('PERIODIC_WITHDRAWAL_INTERVAL', 24 * 3600)),
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_WITHDRAWAL_INTERVAL'), 24 * 3600),
         'args': ()
     },
     'periodic_immature_to_mature': {
         'task': 'core.tasks.immature_to_mature',
-        'schedule': int(os.environ.get('PERIODIC_IMMATURE_TO_MATURE_INTERVAL', 24 * 3600)),
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_IMMATURE_TO_MATURE_INTERVAL'), 24 * 3600),
         'args': ()
     },
     'periodic_aggregate': {
         'task': 'core.tasks.aggregate',
-        'schedule': int(os.environ.get('PERIODIC_AGGREGATE_INTERVAL', 24 * 3600)),
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_AGGREGATE_INTERVAL'), 24 * 3600),
         'args': ()
     },
     'periodic_ergo_price': {
         'task': 'core.tasks.get_ergo_price',
-        'schedule': int(os.environ.get('PERIODIC_GET_ERGO_PRICE', 3600)),
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_GET_ERGO_PRICE'), 3600),
         'args': ()
     },
 }
