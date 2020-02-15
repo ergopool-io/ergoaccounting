@@ -13,9 +13,9 @@ class AggregateShareSerializer(serializers.ModelSerializer):
 
 class ShareSerializer(serializers.ModelSerializer):
     miner = serializers.CharField()
-    miner_address = serializers.CharField()
-    lock_address = serializers.CharField()
-    withdraw_address = serializers.CharField()
+    miner_address = serializers.CharField(required=False)
+    lock_address = serializers.CharField(required=False)
+    withdraw_address = serializers.CharField(required=False)
     difficulty = serializers.IntegerField()
     client_ip = serializers.IPAddressField(allow_blank=True, write_only=True)
 
