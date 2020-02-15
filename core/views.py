@@ -11,11 +11,11 @@ from django.utils import timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
 from rest_framework.decorators import action
-from rest_framework.pagination import PageNumberPagination
+from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
 from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_HASH_RATE, DEFAULT_STOP_TIME_STAMP_HASH_RATE, \
-    LIMIT_NUMBER_CHUNK_HASH_RATE, API_KEY, NUMBER_OF_LAST_INCOME
+    LIMIT_NUMBER_CHUNK_HASH_RATE, API_KEY, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, EXTRA_INFO_KEY_TYPE
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
@@ -34,6 +34,11 @@ class CustomPagination(PageNumberPagination):
     page_size_query_param = 'size'
     max_page_size = MAX_PAGINATION_SIZE
     last_page_strings = []
+
+
+class CustomPaginationLimitOffset(LimitOffsetPagination):
+    default_limit = DEFAULT_PAGINATION_SIZE
+    max_limit = MAX_PAGINATION_SIZE
 
 
 class ShareView(viewsets.GenericViewSet,
@@ -166,6 +171,58 @@ class UserApiViewSet(viewsets.GenericViewSet,
         miner = Miner.objects.filter(Q(public_key=pk) | Q(address__address=pk)).distinct()
         return miner
 
+    def get_balance(self):
+        """
+        get balance and sort them
+        :return:
+        """
+        self.pagination_class = CustomPaginationLimitOffset
+        self.filter_backends = [filters.OrderingFilter]
+        self.ordering_fields = ['date', 'amount']
+        self.ordering = 'date'
+
+        # Get object detail method call
+        miner = self.get_object().first()
+        query = self.request.query_params
+        # Set timezone
+        tz = get_current_timezone()
+        # Set start period for get data from data_base if there is not start param set DEFAULT_START_PAYOUT
+        start = int(query.get('start') or DEFAULT_START_PAYOUT)
+        # Rounding start time to first day
+        start = int(timezone.datetime.fromtimestamp(start, tz=tz).replace(hour=0, minute=0, second=0).timestamp())
+        # Set end period for get data from data_base if there is not stop param set time now
+        stop = int(query.get('stop') or timezone.now().timestamp())
+        # Rounding start time to end day
+        stop = int(timezone.datetime.fromtimestamp(stop, tz=tz).replace(hour=23, minute=59, second=59).timestamp())
+        # validate ordering params
+        ordering_fields = self.ordering_fields
+        ordering_fields = ordering_fields + ['-' + i for i in ordering_fields]
+        field = query.get('ordering')
+        order = field if field in ordering_fields else self.ordering
+        # send query for get amount of payout for a miner in one day
+        balances = Balance.objects.filter(
+            Q(miner=miner) &
+            Q(created_at__gte=timezone.datetime.fromtimestamp(start, tz=tz)) &
+            Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz)) &
+            Q(status='withdraw')
+        ).extra(
+            select={
+                'date': 'EXTRACT(epoch from "core_balance"."created_at"::DATE)'
+            }
+        ).values('date').annotate(amount=Sum('balance')).order_by(order)
+        balances = list(balances)
+
+        # Create response
+        response = []
+        for balance in balances:
+            response.append({
+                "date": int(balance['date']),
+                "tx": None,
+                "height": None,
+                "amount": int(balance['amount'])
+            })
+        return response
+
     @action(detail=True, name='income')
     def income(self, request, *args, **kwargs):
         """
@@ -180,6 +237,17 @@ class UserApiViewSet(viewsets.GenericViewSet,
         logger.debug("Get income for miner {}".format(miner.public_key))
         response = [{'height': obj['block_height'], 'balance': obj['balance']} for obj in share]
         return Response(response)
+
+    @action(detail=True, name='payout')
+    def payout(self, request, *args, **kwargs):
+        """
+        Get amount of payout for a miner in every day between timestamp
+        """
+        queryset = self.get_balance()
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            return self.get_paginated_response(page)
+        return Response(queryset[:])
 
     def list(self, request, *args, **kwargs):
         return self.get_response(request)
@@ -487,7 +555,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
 
         response = {
             "hash_rate": {
-                "network": int(difficulty_network/PERIOD_HASH_RATE),
+                "network": int(difficulty_network/PERIOD_HASH_RATE) + 1,
                 "pool": pool_hash_rate['total_hash_rate']
             },
             "miners": count_miner,
