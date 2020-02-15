@@ -64,8 +64,16 @@ class ShareTestCase(TestCase):
                 'next_ids': [],
                 'path': '-1',
                 'difficulty': 123456}
+        data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(mocked_not_call_prop.called)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['miner_address'],
+                                                category='miner').count(), 0)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['lock_address'],
+                                                category='lock').count(), 0)
+        self.assertEqual(
+            Address.objects.filter(address_miner__public_key='1', address=self.addresses['withdraw_address'],
+                                   category='withdraw').count(), 0)
 
     def test_solved_share_without_transaction_id(self):
         """
@@ -287,6 +295,47 @@ class ShareTestCase(TestCase):
         self.assertTrue(
             Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
                                    category='withdraw').first().last_used > withdraw_last_used)
+
+    def test_validate_invalid_share_do_not_update_last_used(self):
+        """
+        test if a non-solution submitted share must store with None in transaction_id and block_height
+        addresses are present, last_used field must be updated
+        """
+        miner_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                 address=self.addresses['miner_address'], category='miner').last_used
+        lock_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                address=self.addresses['lock_address'], category='lock').last_used
+        withdraw_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                    address=self.addresses['withdraw_address'],
+                                                    category='withdraw').last_used
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '2',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                "block_height": 40404,
+                'parent_id': 'test',
+                'next_ids': [],
+                'client_ip': '127.0.0.1',
+                'path': '-1',
+                'status': 'invalid',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
+                                                category='miner').count(), 1)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
+                                                category='lock').count(), 1)
+        self.assertEqual(
+            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
+                                   category='withdraw').count(), 1)
+        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
+                                               category='miner').first().last_used == miner_last_used)
+        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
+                                               category='lock').first().last_used == lock_last_used)
+        self.assertTrue(
+            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
+                                   category='withdraw').first().last_used == withdraw_last_used)
 
     def tearDown(self):
         Address.objects.all().delete()
