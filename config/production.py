@@ -19,7 +19,7 @@ DATABASES = {
     }
 }
 # Allowed Hosts
-ALLOWED_HOSTS = os.environ.get('HOST').split(",")
+ALLOWED_HOSTS = os.environ.get('HOST', "").split(",")
 
 
 # Explorer ergo
