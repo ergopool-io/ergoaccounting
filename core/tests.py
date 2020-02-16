@@ -632,17 +632,18 @@ class UserApiTestCase(TestCase):
                 'abc': {
                     "round_valid_shares": 2,
                     "round_invalid_shares": 0,
-                    "immature": 300.0,
-                    "mature": 300.0,
-                    "withdraw": 400.0,
-                    "hashrate": 1
+                    "immature": 300,
+                    "mature": 300,
+                    "withdraw": 400,
+                    "hash_rate": 1
                 },
                 'xyz': {
                     "round_valid_shares": 2,
                     "round_invalid_shares": 1,
                     "immature": 0,
-                    "mature": 1100.0,
-                    "withdraw": 0
+                    "mature": 1100,
+                    "withdraw": 0,
+                    "hash_rate": 1
                 }
             }
         }
@@ -657,16 +658,18 @@ class UserApiTestCase(TestCase):
                 'abc': {
                     "round_valid_shares": 2,
                     "round_invalid_shares": 1,
-                    "immature": 300.0,
-                    "mature": 300.0,
-                    "withdraw": 400.0
+                    "immature": 300,
+                    "mature": 300,
+                    "withdraw": 400,
+                    "hash_rate": 1
                 },
                 'xyz': {
                     "round_valid_shares": 2,
                     "round_invalid_shares": 0,
                     "immature": 0,
-                    "mature": 1100.0,
-                    "withdraw": 0
+                    "mature": 1100,
+                    "withdraw": 0,
+                    "hash_rate": 1
                 }
             }
         })
@@ -686,9 +689,10 @@ class UserApiTestCase(TestCase):
             'users': {
                 'abc': {
                     "round_shares": 2,
-                    "immature": 300.0,
-                    "mature": 300.0,
-                    "withdraw": 400.0
+                    "immature": 300,
+                    "mature": 300,
+                    "withdraw": 400,
+                    "hash_rate": 1
                 }
             }
         }
@@ -704,9 +708,10 @@ class UserApiTestCase(TestCase):
                 'abc': {
                     "round_valid_shares": 2,
                     "round_invalid_shares": 1,
-                    "immature": 300.0,
-                    "mature": 300.0,
-                    "withdraw": 400.0
+                    "immature": 300,
+                    "mature": 300,
+                    "withdraw": 400,
+                    "hash_rate": 1
                 }
             }
         })

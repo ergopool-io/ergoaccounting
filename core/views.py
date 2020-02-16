@@ -366,18 +366,22 @@ class UserApiViewSet(viewsets.GenericViewSet,
         return Response(response)
 
     def list(self, request, *args, **kwargs):
-        return self.get_response(request)
+        round_start = self.get_last_solved_timestamp()
+        total_row = self.get_total_params(round_start)
+        if not request.user.is_authenticated:
+            return Response(total_row)
+        total_row['users'] = self.get_user_params(round_start)
+        return Response(total_row)
 
     def retrieve(self, request, *args, **kwargs):
-        return self.get_response(request, kwargs.get("pk").lower())
+        round_start = self.get_last_solved_timestamp()
+        total_row = self.get_total_params(round_start)
+        total_row['users'] = self.get_user_params(round_start, kwargs.get("pk"))
+        return Response(total_row)
 
-    def get_response(self, request, pk=None):
+    def get_last_solved_timestamp(self):
         """
-        Returns information for this round of shares.
-        In the response, there is total shares count of this round and information about each miner balances.
-        If the pk is set in url parameters, then information is just about that miner.
-        :param request:
-        :param pk:
+        return last solved share timestamp. if no solved share return first share time. otherwise return current datetime
         :return:
         """
         # Timestamp of last solved share
@@ -385,54 +389,73 @@ class UserApiViewSet(viewsets.GenericViewSet,
             last_solved=Max('created_at', filter=Q(status='solved')),
             first_share=Min('created_at')
         )
-        last_solved_timestamp = times.get("last_solved") or times.get("first_share") or datetime.now()
-        # Set the response to be all miners or just one with specified public_key or address of miner
-        miners = Miner.objects.filter(
-            Q(public_key=pk) |
-            Q(address__address=pk)
-        ) if pk else Miner.objects
+        return times.get("last_solved") or times.get("first_share") or datetime.now()
 
+    def get_total_params(self, round_start_time):
+        """
+        return a list contain overall parameters on pool.
+        :param round_start_time: round start time
+        :return: json contain overall parameters
+        """
         # Total shares count of this round
-        total_count = Share.objects.filter(created_at__gt=last_solved_timestamp).aggregate(
+        total_count = Share.objects.filter(created_at__gt=round_start_time).aggregate(
             valid=Count("id", filter=Q(status="valid")),
             invalid=Count("id", filter=Q(status__in=["invalid", "repetitious"]))
         )
+        miners_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME))
+        return {
+            'round_valid_shares': int(total_count.get("valid", 0)),
+            'round_invalid_shares': int(total_count.get("invalid", 0)),
+            'timestamp': round_start_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'hash_rate': int(miners_hash_rate.get('total_hash_rate', 1)),
+        }
+
+    def get_user_params(self, round_start_time, user_pk=None):
+        """
+        get all parameters for specific user or all users
+        :param round_start_time: start datetime for calculation
+        :param user_pk: selected user pk or address. if empty response for all users returned
+        :return:
+        """
+        request = self.request
+        # Set the response to be all miners or just one with specified public_key or address of miner
+        miners = Miner.objects.filter(
+            Q(public_key=user_pk) |
+            Q(address__address=user_pk)
+        ) if user_pk else Miner.objects
 
         # Shares of this round and balances of user
-        round_shares = miners.values('public_key').annotate(
-            valid_shares=Count('id', filter=Q(share__created_at__gt=last_solved_timestamp, share__status="valid")),
-            invalid_shares=Count('id', filter=Q(share__created_at__gt=last_solved_timestamp, share__status="invalid")),
+        round_shares = Miner.objects.filter(pk__in=miners.values('pk')).values('public_key').annotate(
+            valid_shares=Count('id', filter=Q(share__created_at__gt=round_start_time, share__status="valid")),
+            invalid_shares=Count('id', filter=Q(share__created_at__gt=round_start_time, share__status="invalid")),
             immature=Sum('share__balance__balance', filter=Q(share__balance__status="immature")),
             mature=Sum('share__balance__balance', filter=Q(share__balance__status="mature")),
             withdraw=Sum('share__balance__balance', filter=Q(share__balance__status="withdraw")),
         )
-        public_key_hash_rate = round_shares[0]['public_key'] if pk else None
+        round_share = round_shares.first() or {}
+        public_key_hash_rate = round_share.get('public_key') if user_pk else None
         miners_hash_rate = compute_hash_rate(
             timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME),
             pk=public_key_hash_rate
         )
         logger.info('Current hash rate: {}'.format(miners_hash_rate))
-        miners_info = dict()
-        response = {
-            'round_valid_shares': total_count.get("valid", 0),
-            'round_invalid_shares': total_count.get("invalid", 0),
-            'timestamp': last_solved_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            'hash_rate': miners_hash_rate['total_hash_rate'],
-        }
-        if request.user.is_authenticated or pk:
-            for item in round_shares:
-                miners_info[pk or item['public_key']] = dict()
-                miners_info[pk or item['public_key']]['round_valid_shares'] = item['valid_shares']
-                miners_info[pk or item['public_key']]['round_invalid_shares'] = item['invalid_shares']
-                miners_info[pk or item['public_key']]['immature'] = item['immature'] if item['immature'] else 0
-                miners_info[pk or item['public_key']]['mature'] = item['mature'] if item['mature'] else 0
-                miners_info[pk or item['public_key']]['withdraw'] = item['withdraw'] if item['withdraw'] else 0
-                if item['public_key'] in miners_hash_rate:
-                    miners_info[pk or item['public_key']]['hash_rate'] = miners_hash_rate[item['public_key']][
-                        'hash_rate']
-            response['users'] = miners_info
+        response = {}
 
-        return Response(response)
+        def convert_row(row_dict):
+            return {
+                "round_valid_shares": int(row_dict.get("valid_shares") or 0),
+                "round_invalid_shares": int(row_dict.get("invalid_shares") or 0),
+                "immature": int(row_dict.get("immature") or 0),
+                "mature": int(row_dict.get("mature") or 0),
+                "withdraw": int(row_dict.get("withdraw") or 0),
+                "hash_rate": int(miners_hash_rate.get(row_dict.get("public_key"), {}).get("hash_rate") or 1),
+            }
+        if user_pk:
+            response[user_pk] = convert_row(round_shares[0] if len(round_shares) > 0 else {})
+        else:
+            for item in round_shares:
+                response[item.get("public_key")] = convert_row(item)
+        return response
 
 
 class BlockView(viewsets.GenericViewSet,
