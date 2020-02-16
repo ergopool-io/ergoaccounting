@@ -239,6 +239,7 @@ def immature_to_mature():
 
     headers = res['response']
     ids = set(h['id'] for h in headers)
+    chain = [{"height": h['height'], "transaction_id": h['transactionsId']} for h in headers]
 
     for share in all_considered_shares:
         if share.parent_id not in ids or len(ids.intersection(share.next_ids)) > 0:
@@ -254,6 +255,9 @@ def immature_to_mature():
             res = txt_res['response']
             if 'error' in res and res['error'] == 404 and 'reason' in res and res['reason'] == 'not-found':
                 # transaction is not in the blockchain
+                make_share_orphaned(share)
+            if {"height": share.block_height, "transaction_id": share.transaction_id} not in chain:
+                # transaction is not in the chain slice
                 make_share_orphaned(share)
 
             logger.error('can not get transaction info from node for id {}! exiting.'.format(share.transaction_id))
