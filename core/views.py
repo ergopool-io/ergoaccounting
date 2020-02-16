@@ -14,8 +14,8 @@ from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
 from rest_framework.response import Response
 
-from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_HASH_RATE, DEFAULT_STOP_TIME_STAMP_HASH_RATE, \
-    LIMIT_NUMBER_CHUNK_HASH_RATE, API_KEY, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT
+from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
+    LIMIT_NUMBER_CHUNK_DIAGRAM, API_KEY, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, EXTRA_INFO_KEY_TYPE
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
@@ -253,6 +253,61 @@ class UserApiViewSet(viewsets.GenericViewSet,
             return self.get_paginated_response(page)
         return Response(queryset[:])
 
+    @action(detail=True, name='share')
+    def share(self, request, *args, **kwargs):
+        """
+        return valid and invalid shares of a miner between 2 time stamp
+        """
+        miner = self.get_object().first()
+        # Get query_params
+        query = self.request.query_params
+        # Set start period for get data from data_base if there is not start param set time now mines
+        # DEFAULT_STOP_TIME_STAMP_DIAGRAM
+        start = int(query.get('start') or timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_DIAGRAM)
+        start_frame = int(start / PERIOD_DIAGRAM)
+        # Set end period for get data from data_base if there is not stop param set time now
+        stop = int(query.get('stop') or timezone.now().timestamp())
+        # Check number of chunk should not bigger than LIMIT_NUMBER_CHUNK_DIAGRAM
+        if (stop - start) / PERIOD_DIAGRAM >= LIMIT_NUMBER_CHUNK_DIAGRAM:
+            stop = min(stop, start + (LIMIT_NUMBER_CHUNK_DIAGRAM * PERIOD_DIAGRAM))
+        stop_frame = int(stop / PERIOD_DIAGRAM)
+        tz = get_current_timezone()
+        logger.info('get shares valid and invalid for miner: {}'.format(miner.public_key))
+        # Add share from table share and split with status 'valid', 'solved' and 'invalid', 'repetitious'
+        shares = Share.objects.filter(
+            Q(miner=miner) &
+            Q(created_at__gte=timezone.datetime.fromtimestamp(start, tz=tz)) &
+            Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz))
+        ).extra(
+            select={
+                'frame': 'Cast(EXTRACT(epoch from "core_share"."created_at")AS INTEGER) / {}'.format(
+                    str(PERIOD_DIAGRAM)
+                )
+            }
+        ).values('frame').annotate(
+            valid=Count('id', filter=Q(status__in=['valid', 'solved'])),
+            invalid=Count('id', filter=Q(status__in=['invalid', 'repetitious']))
+        ).order_by('frame')
+        shares = list(shares)
+        response = []
+        index = 0
+        # Create response
+        for i in range(start_frame, stop_frame + 1):
+            if index < len(shares) and shares[index]['frame'] == i:
+                valid = shares[index]['valid']
+                invalid = shares[index]['invalid']
+                index += 1
+            else:
+                valid = 0
+                invalid = 0
+            if i >= start_frame:
+                response.append({
+                    "date": i * PERIOD_DIAGRAM,
+                    "valid": int(valid),
+                    "invalid": int(invalid)
+                })
+        return Response(response)
+
     def list(self, request, *args, **kwargs):
         return self.get_response(request)
 
@@ -437,28 +492,28 @@ class HashRateViewSet(viewsets.GenericViewSet, mixins.RetrieveModelMixin):
         # Get query_params
         query = self.request.query_params
         # Set start period for get data from data_base if there is not start param set time now mines
-        # DEFAULT_STOP_TIME_STAMP_HASH_RATE
-        start = int(query.get('start') or timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_HASH_RATE)
-        start_frame = int(start / PERIOD_HASH_RATE)
+        # DEFAULT_STOP_TIME_STAMP_DIAGRAM
+        start = int(query.get('start') or timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_DIAGRAM)
+        start_frame = int(start / PERIOD_DIAGRAM)
         # Set end period for get data from data_base if there is not stop param set time now
         stop = int(query.get('stop') or timezone.now().timestamp())
-        # Check number of chunk should not bigger than LIMIT_NUMBER_CHUNK_HASH_RATE
-        if (stop - start) / PERIOD_HASH_RATE >= LIMIT_NUMBER_CHUNK_HASH_RATE:
-            stop = min(stop, start + (LIMIT_NUMBER_CHUNK_HASH_RATE * PERIOD_HASH_RATE))
-        stop_frame = int(stop / PERIOD_HASH_RATE)
-        prev_chunks = int(TOTAL_PERIOD_HASH_RATE / PERIOD_HASH_RATE)
+        # Check number of chunk should not bigger than LIMIT_NUMBER_CHUNK_DIAGRAM
+        if (stop - start) / PERIOD_DIAGRAM >= LIMIT_NUMBER_CHUNK_DIAGRAM:
+            stop = min(stop, start + (LIMIT_NUMBER_CHUNK_DIAGRAM * PERIOD_DIAGRAM))
+        stop_frame = int(stop / PERIOD_DIAGRAM)
+        prev_chunks = int(TOTAL_PERIOD_HASH_RATE / PERIOD_DIAGRAM)
         tz = get_current_timezone()
         logger.info('computing hash rate for pk: {}'.format(pk))
         shares = Share.objects.filter(
             Q(miner__public_key=pk) &
-            Q(created_at__gte=timezone.datetime.fromtimestamp(start - (prev_chunks + 1) * PERIOD_HASH_RATE,
+            Q(created_at__gte=timezone.datetime.fromtimestamp(start - (prev_chunks + 1) * PERIOD_DIAGRAM,
                                                               tz=tz)) &
             Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz)) &
             Q(status__in=['valid', 'solved'])
         ).extra(
             select={
                 'frame': 'Cast(EXTRACT(epoch from "core_share"."created_at")AS INTEGER) / {}'.format(
-                    str(PERIOD_HASH_RATE)
+                    str(PERIOD_DIAGRAM)
                 )
             }
         ).values('frame').annotate(sum=Sum('difficulty'))
@@ -472,7 +527,7 @@ class HashRateViewSet(viewsets.GenericViewSet, mixins.RetrieveModelMixin):
         # Calculate HashRate average and current
         for i in range(start_frame - prev_chunks, stop_frame + 1):
             if index < len(shares) and shares[index]['frame'] == i:
-                val = shares[index]['sum'] / PERIOD_HASH_RATE
+                val = shares[index]['sum'] / PERIOD_DIAGRAM
                 index += 1
             else:
                 val = 0
@@ -481,10 +536,11 @@ class HashRateViewSet(viewsets.GenericViewSet, mixins.RetrieveModelMixin):
             if i >= start_frame:
                 sum_avg -= chunk.pop(0)
                 response.append({
-                    "timestamp": i * PERIOD_HASH_RATE,
+                    "timestamp": i * PERIOD_DIAGRAM,
                     "avg": int(sum_avg / prev_chunks),
                     "current": int(val)
                 })
+        print(shares)
         return Response(response)
 
 
@@ -509,10 +565,10 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 "blocks_in_hour": float
             }
         """
-        # Calculate hash_rate of network with getting last block between now time and past PERIOD_HASH_RATE
+        # Calculate hash_rate of network with getting last block between now time and past PERIOD_DIAGRAM
         url = urljoin(ERGO_EXPLORER_ADDRESS, 'blocks')
         query = {
-            'startDate': int(timezone.now().timestamp() - PERIOD_HASH_RATE) * 1000,
+            'startDate': int(timezone.now().timestamp() - PERIOD_DIAGRAM) * 1000,
             'endDate': int(timezone.now().timestamp()) * 1000
         }
         try:
@@ -528,7 +584,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         for item in items:
             difficulty_network += item.get('difficulty')
         # Calculate HashRate of pool
-        pool_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=PERIOD_HASH_RATE))
+        pool_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=PERIOD_DIAGRAM))
         # Number of miner in table Miner
         count_miner = Miner.objects.count()
         # Get blocks solved in past hour
@@ -562,7 +618,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
 
         response = {
             "hash_rate": {
-                "network": int(difficulty_network/PERIOD_HASH_RATE) + 1,
+                "network": int(difficulty_network/PERIOD_DIAGRAM) + 1,
                 "pool": pool_hash_rate['total_hash_rate']
             },
             "miners": count_miner,
