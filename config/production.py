@@ -129,12 +129,12 @@ BALANCE_DETAIL_FOLDER = 'balance_detail'
 
 # Total period calculate hash rate 1-Day (second)
 TOTAL_PERIOD_HASH_RATE = 24 * 60 * 60
-# Period calculate hash rate 30 minute (second)
-PERIOD_HASH_RATE = 30 * 60
+# Period calculate diagram 30 minute (second)
+PERIOD_DIAGRAM = 30 * 60
 # Default stop timestamp if not set stop
-DEFAULT_STOP_TIME_STAMP_HASH_RATE = 50 * 60 * 60
+DEFAULT_STOP_TIME_STAMP_DIAGRAM = 50 * 60 * 60
 # Number of Chunk
-LIMIT_NUMBER_CHUNK_HASH_RATE = 1000
+LIMIT_NUMBER_CHUNK_DIAGRAM = 1000
 # Limit on get last balance
 NUMBER_OF_LAST_INCOME = 1000
 # time stamp for start payout if not exist
