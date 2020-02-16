@@ -11,13 +11,13 @@ from django.utils import timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
 from rest_framework.decorators import action
-from rest_framework.pagination import PageNumberPagination
+from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
 from rest_framework.response import Response
 
-from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_HASH_RATE, DEFAULT_STOP_TIME_STAMP_HASH_RATE, \
-    LIMIT_NUMBER_CHUNK_HASH_RATE, API_KEY, NUMBER_OF_LAST_INCOME
+from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
+    LIMIT_NUMBER_CHUNK_DIAGRAM, API_KEY, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address
+    CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, EXTRA_INFO_KEY_TYPE
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from core.tasks import generate_and_send_transaction
 from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable, node_request
@@ -34,6 +34,11 @@ class CustomPagination(PageNumberPagination):
     page_size_query_param = 'size'
     max_page_size = MAX_PAGINATION_SIZE
     last_page_strings = []
+
+
+class CustomPaginationLimitOffset(LimitOffsetPagination):
+    default_limit = DEFAULT_PAGINATION_SIZE
+    max_limit = MAX_PAGINATION_SIZE
 
 
 class ShareView(viewsets.GenericViewSet,
@@ -57,25 +62,29 @@ class ShareView(viewsets.GenericViewSet,
         _status = serializer.validated_data['status']
         rep_share = Share.objects.filter(share=_share)
 
-        miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
-                                                      address_miner=miner, category='miner')[0]
-        lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
-                                                     address_miner=miner, category='lock')[0]
-        withdraw_address = Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
-                                                         address_miner=miner, category='withdraw')[0]
-        # updating updated_at field
-        miner_address.save()
-        lock_address.save()
-        withdraw_address.save()
-
         if not rep_share:
             logger.info('New share, saving.')
-            serializer.save(miner=miner, miner_address=miner_address,
-                            lock_address=lock_address, withdraw_address=withdraw_address)
+            if _status in ["solved", "valid"]:
+                miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
+                                                              address_miner=miner, category='miner')[0]
+                lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
+                                                             address_miner=miner, category='lock')[0]
+                withdraw_address = \
+                    Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
+                                                  address_miner=miner, category='withdraw')[0]
+                # updating updated_at field
+                miner_address.save()
+                lock_address.save()
+                withdraw_address.save()
+                serializer.save(miner=miner, withdraw_address=withdraw_address, miner_address=miner_address,
+                                lock_address=lock_address)
+
+            else:
+                serializer.save(miner=miner, withdraw_address=None, miner_address=None, lock_address=None)
+
         else:
             logger.info('Repetitious share, saving.')
-            serializer.save(status="repetitious", miner=miner, miner_address=miner_address,
-                            lock_address=lock_address, withdraw_address=withdraw_address)
+            serializer.save(status="repetitious", miner=miner)
             _status = "repetitious"
         if _status == "solved":
             logger.info('Solved share, saving.')
@@ -166,6 +175,58 @@ class UserApiViewSet(viewsets.GenericViewSet,
         miner = Miner.objects.filter(Q(public_key=pk) | Q(address__address=pk)).distinct()
         return miner
 
+    def get_balance(self):
+        """
+        get balance and sort them
+        :return:
+        """
+        self.pagination_class = CustomPaginationLimitOffset
+        self.filter_backends = [filters.OrderingFilter]
+        self.ordering_fields = ['date', 'amount']
+        self.ordering = 'date'
+
+        # Get object detail method call
+        miner = self.get_object().first()
+        query = self.request.query_params
+        # Set timezone
+        tz = get_current_timezone()
+        # Set start period for get data from data_base if there is not start param set DEFAULT_START_PAYOUT
+        start = int(query.get('start') or DEFAULT_START_PAYOUT)
+        # Rounding start time to first day
+        start = int(timezone.datetime.fromtimestamp(start, tz=tz).replace(hour=0, minute=0, second=0).timestamp())
+        # Set end period for get data from data_base if there is not stop param set time now
+        stop = int(query.get('stop') or timezone.now().timestamp())
+        # Rounding start time to end day
+        stop = int(timezone.datetime.fromtimestamp(stop, tz=tz).replace(hour=23, minute=59, second=59).timestamp())
+        # validate ordering params
+        ordering_fields = self.ordering_fields
+        ordering_fields = ordering_fields + ['-' + i for i in ordering_fields]
+        field = query.get('ordering')
+        order = field if field in ordering_fields else self.ordering
+        # send query for get amount of payout for a miner in one day
+        balances = Balance.objects.filter(
+            Q(miner=miner) &
+            Q(created_at__gte=timezone.datetime.fromtimestamp(start, tz=tz)) &
+            Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz)) &
+            Q(status='withdraw')
+        ).extra(
+            select={
+                'date': 'EXTRACT(epoch from "core_balance"."created_at"::DATE)'
+            }
+        ).values('date').annotate(amount=Sum('balance')).order_by(order)
+        balances = list(balances)
+
+        # Create response
+        response = []
+        for balance in balances:
+            response.append({
+                "date": int(balance['date']),
+                "tx": None,
+                "height": None,
+                "amount": int(balance['amount'])
+            })
+        return response
+
     @action(detail=True, name='income')
     def income(self, request, *args, **kwargs):
         """
@@ -179,6 +240,129 @@ class UserApiViewSet(viewsets.GenericViewSet,
         ).values('block_height').annotate(balance=Sum('balance__balance'))[:NUMBER_OF_LAST_INCOME]
         logger.debug("Get income for miner {}".format(miner.public_key))
         response = [{'height': obj['block_height'], 'balance': obj['balance']} for obj in share]
+        return Response(response)
+
+    @action(detail=True, name='payout')
+    def payout(self, request, *args, **kwargs):
+        """
+        Get amount of payout for a miner in every day between timestamp
+        """
+        queryset = self.get_balance()
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            return self.get_paginated_response(page)
+        return Response(queryset[:])
+
+    @action(detail=True, name='hash_rate')
+    def hash_rate(self, request, *args, **kwargs):
+        """
+        Returns Average and current hash_rate
+        """
+        miner = self.get_object().first()
+        # Get query_params
+        query = self.request.query_params
+        # Set start period for get data from data_base if there is not start param set time now mines
+        # DEFAULT_STOP_TIME_STAMP_DIAGRAM
+        start = int(query.get('start') or timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_DIAGRAM)
+        start_frame = int(start / PERIOD_DIAGRAM)
+        # Set end period for get data from data_base if there is not stop param set time now
+        stop = int(query.get('stop') or timezone.now().timestamp())
+        # Check number of chunk should not bigger than LIMIT_NUMBER_CHUNK_DIAGRAM
+        if (stop - start) / PERIOD_DIAGRAM >= LIMIT_NUMBER_CHUNK_DIAGRAM:
+            stop = min(stop, start + (LIMIT_NUMBER_CHUNK_DIAGRAM * PERIOD_DIAGRAM))
+        stop_frame = int(stop / PERIOD_DIAGRAM)
+        prev_chunks = int(TOTAL_PERIOD_HASH_RATE / PERIOD_DIAGRAM)
+        tz = get_current_timezone()
+        logger.info('computing hash rate for pk: {}'.format(miner.public_key))
+        shares = Share.objects.filter(
+            Q(miner=miner) &
+            Q(created_at__gte=timezone.datetime.fromtimestamp(start - (prev_chunks + 1) * PERIOD_DIAGRAM, tz=tz)) &
+            Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz)) &
+            Q(status__in=['valid', 'solved'])
+        ).extra(
+            select={
+                'frame': 'Cast(EXTRACT(epoch from "core_share"."created_at")AS INTEGER) / {}'.format(
+                    str(PERIOD_DIAGRAM)
+                )
+            }
+        ).values('frame').annotate(sum=Sum('difficulty'))
+
+        shares = list(shares)
+        response = []
+        chunk = []
+        index = 0
+        # Sum of all difficulty shares in the period
+        sum_avg = 0
+        # Calculate HashRate average and current
+        for i in range(start_frame - prev_chunks, stop_frame + 1):
+            if index < len(shares) and shares[index]['frame'] == i:
+                val = shares[index]['sum'] / PERIOD_DIAGRAM
+                index += 1
+            else:
+                val = 0
+            sum_avg += val
+            chunk.append(val)
+            if i >= start_frame:
+                sum_avg -= chunk.pop(0)
+                response.append({
+                    "timestamp": i * PERIOD_DIAGRAM,
+                    "avg": int(sum_avg / prev_chunks),
+                    "current": int(val)
+                })
+
+    @action(detail=True, name='share')
+    def share(self, request, *args, **kwargs):
+        """
+        return valid and invalid shares of a miner between 2 time stamp
+        """
+        miner = self.get_object().first()
+        # Get query_params
+        query = self.request.query_params
+        # Set start period for get data from data_base if there is not start param set time now mines
+        # DEFAULT_STOP_TIME_STAMP_DIAGRAM
+        start = int(query.get('start') or timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_DIAGRAM)
+        start_frame = int(start / PERIOD_DIAGRAM)
+        # Set end period for get data from data_base if there is not stop param set time now
+        stop = int(query.get('stop') or timezone.now().timestamp())
+        # Check number of chunk should not bigger than LIMIT_NUMBER_CHUNK_DIAGRAM
+        if (stop - start) / PERIOD_DIAGRAM >= LIMIT_NUMBER_CHUNK_DIAGRAM:
+            stop = min(stop, start + (LIMIT_NUMBER_CHUNK_DIAGRAM * PERIOD_DIAGRAM))
+        stop_frame = int(stop / PERIOD_DIAGRAM)
+        tz = get_current_timezone()
+        logger.info('get shares valid and invalid for miner: {}'.format(miner.public_key))
+        # Add share from table share and split with status 'valid', 'solved' and 'invalid', 'repetitious'
+        shares = Share.objects.filter(
+            Q(miner=miner) &
+            Q(created_at__gte=timezone.datetime.fromtimestamp(start, tz=tz)) &
+            Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz))
+        ).extra(
+            select={
+                'frame': 'Cast(EXTRACT(epoch from "core_share"."created_at")AS INTEGER) / {}'.format(
+                    str(PERIOD_DIAGRAM)
+                )
+            }
+        ).values('frame').annotate(
+            valid=Count('id', filter=Q(status__in=['valid', 'solved'])),
+            invalid=Count('id', filter=Q(status__in=['invalid', 'repetitious']))
+        ).order_by('frame')
+        shares = list(shares)
+        response = []
+        index = 0
+        # Create response
+        for i in range(start_frame, stop_frame + 1):
+            if index < len(shares) and shares[index]['frame'] == i:
+                valid = shares[index]['valid']
+                invalid = shares[index]['invalid']
+                index += 1
+            else:
+                valid = 0
+                invalid = 0
+            if i >= start_frame:
+                response.append({
+                    "date": i * PERIOD_DIAGRAM,
+                    "valid": int(valid),
+                    "invalid": int(invalid)
+                })
         return Response(response)
 
     def list(self, request, *args, **kwargs):
@@ -235,7 +419,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
             'timestamp': last_solved_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
             'hash_rate': miners_hash_rate['total_hash_rate'],
         }
-        if request.user.is_authenticated:
+        if request.user.is_authenticated or pk:
             for item in round_shares:
                 miners_info[pk or item['public_key']] = dict()
                 miners_info[pk or item['public_key']]['round_valid_shares'] = item['valid_shares']
@@ -244,7 +428,8 @@ class UserApiViewSet(viewsets.GenericViewSet,
                 miners_info[pk or item['public_key']]['mature'] = item['mature'] if item['mature'] else 0
                 miners_info[pk or item['public_key']]['withdraw'] = item['withdraw'] if item['withdraw'] else 0
                 if item['public_key'] in miners_hash_rate:
-                    miners_info[pk or item['public_key']]['hash_rate'] = miners_hash_rate[item['public_key']]['hash_rate']
+                    miners_info[pk or item['public_key']]['hash_rate'] = miners_hash_rate[item['public_key']][
+                        'hash_rate']
             response['users'] = miners_info
 
         return Response(response)
@@ -313,7 +498,8 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
         TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
         miner = self.get_object()
         # balances with "mature", "withdraw" and "pending_withdrawal" status
-        total = Balance.objects.filter(miner=miner, status__in=['mature', 'withdraw', 'pending_withdrawal']).aggregate(Sum('balance')).get('balance__sum')
+        total = Balance.objects.filter(miner=miner, status__in=['mature', 'withdraw', 'pending_withdrawal']).aggregate(
+            Sum('balance')).get('balance__sum')
 
         requested_amount = request.data.get('withdraw_amount')
         try:
@@ -341,83 +527,11 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
                          'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
 
 
-class HashRateViewSet(viewsets.GenericViewSet, mixins.RetrieveModelMixin):
-
-    def get_queryset(self):
-        pass
-
-    def retrieve(self, request, *args, **kwargs):
-        return self.get_response(request, kwargs.get("pk").lower())
-
-    def list(self, request, *args, **kwargs):
-        return Response([])
-
-    def get_response(self, request, pk=None):
-        """
-        Returns Average and current hash_rate
-
-        :param request:
-        :param pk:
-        :return:
-        """
-        # Get query_params
-        query = self.request.query_params
-        # Set start period for get data from data_base if there is not start param set time now mines
-        # DEFAULT_STOP_TIME_STAMP_HASH_RATE
-        start = int(query.get('start') or timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_HASH_RATE)
-        start_frame = int(start / PERIOD_HASH_RATE)
-        # Set end period for get data from data_base if there is not stop param set time now
-        stop = int(query.get('stop') or timezone.now().timestamp())
-        # Check number of chunk should not bigger than LIMIT_NUMBER_CHUNK_HASH_RATE
-        if (stop - start) / PERIOD_HASH_RATE >= LIMIT_NUMBER_CHUNK_HASH_RATE:
-            stop = min(stop, start + (LIMIT_NUMBER_CHUNK_HASH_RATE * PERIOD_HASH_RATE))
-        stop_frame = int(stop / PERIOD_HASH_RATE)
-        prev_chunks = int(TOTAL_PERIOD_HASH_RATE / PERIOD_HASH_RATE)
-        tz = get_current_timezone()
-        logger.info('computing hash rate for pk: {}'.format(pk))
-        shares = Share.objects.filter(
-            Q(miner__public_key=pk) &
-            Q(created_at__gte=timezone.datetime.fromtimestamp(start - (prev_chunks + 1) * PERIOD_HASH_RATE,
-                                                              tz=tz)) &
-            Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz)) &
-            Q(status__in=['valid', 'solved'])
-        ).extra(
-            select={
-                'frame': 'Cast(EXTRACT(epoch from "core_share"."created_at")AS INTEGER) / {}'.format(
-                    str(PERIOD_HASH_RATE)
-                )
-            }
-        ).values('frame').annotate(sum=Sum('difficulty'))
-
-        shares = list(shares)
-        response = []
-        chunk = []
-        index = 0
-        # Sum of all difficulty shares in  the period
-        sum_avg = 0
-        # Calculate HashRate average and current
-        for i in range(start_frame - prev_chunks, stop_frame + 1):
-            if index < len(shares) and shares[index]['frame'] == i:
-                val = shares[index]['sum'] / PERIOD_HASH_RATE
-                index += 1
-            else:
-                val = 0
-            sum_avg += val
-            chunk.append(val)
-            if i >= start_frame:
-                sum_avg -= chunk.pop(0)
-                response.append({
-                    "timestamp": i * PERIOD_HASH_RATE,
-                    "avg": int(sum_avg / prev_chunks),
-                    "current": int(val)
-                })
-        return Response(response)
-
-
 class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     """
     View set for get information of pool and network
     """
+
     def list(self, request, *args, **kwargs):
         """
         :param request:
@@ -434,10 +548,10 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 "blocks_in_hour": float
             }
         """
-        # Calculate hash_rate of network with getting last block between now time and past PERIOD_HASH_RATE
+        # Calculate hash_rate of network with getting last block between now time and past PERIOD_DIAGRAM
         url = urljoin(ERGO_EXPLORER_ADDRESS, 'blocks')
         query = {
-            'startDate': int(timezone.now().timestamp() - PERIOD_HASH_RATE) * 1000,
+            'startDate': int(timezone.now().timestamp() - PERIOD_DIAGRAM) * 1000,
             'endDate': int(timezone.now().timestamp()) * 1000
         }
         try:
@@ -453,7 +567,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         for item in items:
             difficulty_network += item.get('difficulty')
         # Calculate HashRate of pool
-        pool_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=PERIOD_HASH_RATE))
+        pool_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=PERIOD_DIAGRAM))
         # Number of miner in table Miner
         count_miner = Miner.objects.count()
         # Get blocks solved in past hour
@@ -479,15 +593,25 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
             minerip__updated_at__range=(timezone.now() - timedelta(seconds=3600), timezone.now())
         ).distinct().count()
         # Set value of response
+
+        price_btc = ExtraInfo.objects.filter(key='ERGO_PRICE_BTC').first()
+        price_usd = ExtraInfo.objects.filter(key='ERGO_PRICE_USD').first()
+        price_btc = None if price_btc is None else float(price_btc.value)
+        price_usd = None if price_usd is None else float(price_usd.value)
+
         response = {
             "hash_rate": {
-                "network": int(difficulty_network/PERIOD_HASH_RATE),
+                "network": int(difficulty_network/PERIOD_DIAGRAM) + 1,
                 "pool": pool_hash_rate['total_hash_rate']
             },
             "miners": count_miner,
             "active_miners": active_miners_count,
-            "price": 0,
+            "price": {
+                'btc': price_btc,
+                'usd': price_usd
+            },
             "blocks_in_hour": count / 3600
         }
 
         return Response(response)
+
