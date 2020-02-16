@@ -18,9 +18,9 @@ from rest_framework import status
 from django.conf import settings
 
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
-    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP
+    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
-from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction
+from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction, get_ergo_price
 from core.utils import RewardAlgorithm, compute_hash_rate, get_miner_payment_address
 
 
@@ -64,8 +64,16 @@ class ShareTestCase(TestCase):
                 'next_ids': [],
                 'path': '-1',
                 'difficulty': 123456}
+        data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(mocked_not_call_prop.called)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['miner_address'],
+                                                category='miner').count(), 0)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['lock_address'],
+                                                category='lock').count(), 0)
+        self.assertEqual(
+            Address.objects.filter(address_miner__public_key='1', address=self.addresses['withdraw_address'],
+                                   category='withdraw').count(), 0)
 
     def test_solved_share_without_transaction_id(self):
         """
@@ -287,6 +295,47 @@ class ShareTestCase(TestCase):
         self.assertTrue(
             Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
                                    category='withdraw').first().last_used > withdraw_last_used)
+
+    def test_validate_invalid_share_do_not_update_last_used(self):
+        """
+        test if a non-solution submitted share must store with None in transaction_id and block_height
+        addresses are present, last_used field must be updated
+        """
+        miner_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                 address=self.addresses['miner_address'], category='miner').last_used
+        lock_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                address=self.addresses['lock_address'], category='lock').last_used
+        withdraw_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
+                                                    address=self.addresses['withdraw_address'],
+                                                    category='withdraw').last_used
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '2',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                "block_height": 40404,
+                'parent_id': 'test',
+                'next_ids': [],
+                'client_ip': '127.0.0.1',
+                'path': '-1',
+                'status': 'invalid',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
+                                                category='miner').count(), 1)
+        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
+                                                category='lock').count(), 1)
+        self.assertEqual(
+            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
+                                   category='withdraw').count(), 1)
+        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
+                                               category='miner').first().last_used == miner_last_used)
+        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
+                                               category='lock').first().last_used == lock_last_used)
+        self.assertTrue(
+            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
+                                   category='withdraw').first().last_used == withdraw_last_used)
 
     def tearDown(self):
         Address.objects.all().delete()
@@ -1491,7 +1540,7 @@ class PeriodicWithdrawalTestCase(TestCase):
         Balance.objects.create(miner=self.miners[0], balance=int(100e9), status="mature")
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
         periodic_withdrawal()
-        mocked_generate_txs.assert_has_calls([call([(self.miners[0].public_key, int(180e9), max_id + 1)])])
+        mocked_generate_txs.assert_has_calls([call(sorted([(self.miners[0].public_key, int(180e9), max_id + 1)]))])
 
         self.assertEqual(
             Balance.objects.filter(miner=self.miners[0], balance=int(-180e9), status="pending_withdrawal").count(), 1)
@@ -1525,8 +1574,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner2.save()
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
         periodic_withdrawal()
-        mocked_generate_txs.assert_has_calls([call([(miner1.public_key, int(80e9), max_id + 1),
-                                                    (miner2.public_key, int(80e9), max_id + 2)])])
+        mocked_generate_txs.assert_has_calls([call(sorted([(miner1.public_key, int(80e9), max_id + 2),
+                                                    (miner2.public_key, int(80e9), max_id + 1)]))])
         for miner in [miner1, miner2]:
             self.assertEqual(
                 Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(), 1)
@@ -1575,6 +1624,7 @@ class PeriodicWithdrawalTestCase(TestCase):
         Balance.objects.create(miner=miner1, balance=int(-80e9), status="mature")
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
         outputs = [(miner.public_key, int(110e9), max_id + 1 + i) for i, miner in enumerate(self.miners[1:])]
+        outputs = sorted(outputs)
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call(outputs)])
 
@@ -1594,6 +1644,7 @@ class PeriodicWithdrawalTestCase(TestCase):
         Balance.objects.filter(miner=miner1).delete()
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
         outputs = [(miner.public_key, int(110e9), max_id + 1 + i) for i, miner in enumerate(self.miners[1:])]
+        outputs = sorted(outputs)
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call(outputs)])
 
@@ -2945,3 +2996,36 @@ class GetMinerAddressTestCase(TestCase):
     def tearDown(self):
         Miner.objects.all().delete()
         Address.objects.all().delete()
+
+
+class GetMinerAddressTestCase(TestCase):
+    """
+    Test class for ergo price creation and get
+    """
+    def mock_get_price(*args, **kwargs):
+        return {'ergo': {'btc': 10.1, 'usd': 11.1}}
+
+    def setUp(self):
+        pass
+
+    @patch('core.tasks.CoinGeckoAPI.get_price', side_effect=mock_get_price)
+    def test_create_prices(self, mock):
+        """
+        must create prices in DB if not exist
+        """
+        get_ergo_price()
+        self.assertEqual(ExtraInfo.objects.filter(key='ERGO_PRICE_BTC', value='10.1').count(), 1)
+        self.assertEqual(ExtraInfo.objects.filter(key='ERGO_PRICE_USD', value='11.1').count(), 1)
+
+    @patch('core.tasks.CoinGeckoAPI.get_price', side_effect=mock_get_price)
+    def test_update_prices(self, mock):
+        """
+        must update price if they exist
+        """
+        ExtraInfo.objects.create(key='ERGO_PRICE_BTC', value='1.1')
+        get_ergo_price()
+        self.assertEqual(ExtraInfo.objects.filter(key='ERGO_PRICE_BTC', value='10.1').count(), 1)
+        self.assertEqual(ExtraInfo.objects.filter(key='ERGO_PRICE_USD', value='11.1').count(), 1)
+
+    def tearDown(self):
+        ExtraInfo.objects.all().delete()

@@ -9,9 +9,10 @@ from django.db import transaction
 from django.db.models import Q, Sum, Count, Max, Min
 
 from ErgoAccounting.celery import app
-from core.models import Miner, Balance, Configuration, Share, AggregateShare
+from core.models import Miner, Balance, Configuration, Share, AggregateShare, ExtraInfo
 from core.serializers import BalanceSerializer, ShareSerializer, AggregateShareSerializer
 from core.utils import node_request, get_miner_payment_address, RewardAlgorithm
+from pycoingecko import CoinGeckoAPI
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ def periodic_withdrawal():
                    outputs]
         Balance.objects.bulk_create(objects)
         outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
+        outputs = sorted(outputs)
         generate_and_send_transaction(outputs)
 
     except:
@@ -388,3 +390,36 @@ def aggregate():
             if len(aggregated) > 0:
                 with open(shares_aggregate_file, 'a') as file:
                     file.write('\n'.join(aggregated) + '\n')
+
+
+@app.task
+def get_ergo_price():
+    """
+    gets ergo price in usd and btc and save them in DB
+    """
+    try:
+        res = CoinGeckoAPI().get_price(ids='ergo', vs_currencies=['usd', 'btc'])
+        usd_price = res['ergo']['usd']
+        btc_price = res['ergo']['btc']
+        usd = ExtraInfo.objects.filter(key='ERGO_PRICE_USD').first()
+        btc = ExtraInfo.objects.filter(key='ERGO_PRICE_BTC').first()
+
+        if usd:
+            logger.info('updating ergo price in usd.')
+            usd.value = str(usd_price)
+            usd.save()
+        else:
+            ExtraInfo.objects.create(key='ERGO_PRICE_USD', value=str(usd_price))
+            logger.info('created ergo price in usd.')
+
+        if btc:
+            logger.info('updating ergo price in btc.')
+            btc.value = str(btc_price)
+            btc.save()
+        else:
+            ExtraInfo.objects.create(key='ERGO_PRICE_BTC', value=str(btc_price))
+            logger.info('created ergo price in usd.')
+
+    except Exception as ex:
+        print(ex)
+        logger.error('problem getting ergo price!')
