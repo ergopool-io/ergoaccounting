@@ -1,9 +1,12 @@
 import os
 from ErgoAccounting.celery import app
 
-# # Database
-# # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
 
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = os.environ.get("DEBUGGING") == "DEBUG"
+
+# Database
+# https://docs.djangoproject.com/en/2.2/ref/settings/#databases
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
@@ -15,7 +18,7 @@ DATABASES = {
     }
 }
 # Allowed Hosts
-ALLOWED_HOSTS = ['127.0.0.1', os.environ.get('HOST'), os.environ.get("INTERNAL_HOST")]
+ALLOWED_HOSTS = os.environ.get('HOST').split(",")
 
 
 # Explorer ergo
@@ -75,7 +78,7 @@ LOGGING = {
 }
 
 # set your approprate broker url, e.g, rabbitmq or redis
-broker_url = os.environ.get("BROKER_URL")
+CELERY_BROKER_URL = os.environ.get("BROKER_URL")
 #'amqp://guest:guest@localhost:5672//'
 
 # for interval of the periodic task PERIODIC_WITHDRAWAL_INTERVAL should be set
@@ -99,7 +102,7 @@ app.conf.beat_schedule = {
     },
 }
 
-# aggregate parameters
+# aggregate parameters, please set with a confidence threshold
 KEEP_SHARES_WITH_DETAIL_NUM = 10
 KEEP_SHARES_AGGREGATION_NUM = 710
 KEEP_BALANCE_WITH_DETAIL_NUM = 720
