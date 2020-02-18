@@ -309,6 +309,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
                     "avg": int(sum_avg / prev_chunks),
                     "current": int(val)
                 })
+        return Response(response)
 
     @action(detail=True, name='share')
     def share(self, request, *args, **kwargs):
