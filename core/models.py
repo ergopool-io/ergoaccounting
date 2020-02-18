@@ -104,7 +104,7 @@ class Address(models.Model):
         ("withdraw", "withdraw address")
     )
 
-    address = models.CharField(max_length=255, blank=False, null=False)
+    address = models.CharField(max_length=255, blank=False, null=False, unique=True)
     category = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
     address_miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
