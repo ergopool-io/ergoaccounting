@@ -259,7 +259,7 @@ def node_request(api, header=None, data=None, params=None, request_type="get"):
         if request_type not in ['get', 'post', 'put', 'patch', 'option']:
             return {"status": "error", "response": "invalid request type"}
         # requests kwargs generated
-        kwargs = {"headers.json": header}
+        kwargs = {"headers": header}
         # append data to kwargs if exists
         if data:
             kwargs["data"] = json.dumps(data)
