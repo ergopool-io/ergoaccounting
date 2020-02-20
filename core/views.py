@@ -306,8 +306,8 @@ class UserApiViewSet(viewsets.GenericViewSet,
                 sum_avg -= chunk.pop(0)
                 response.append({
                     "timestamp": i * PERIOD_DIAGRAM,
-                    "avg": int(sum_avg / prev_chunks),
-                    "current": int(val)
+                    "avg": int(sum_avg / prev_chunks) + 1,
+                    "current": int(val) + 1
                 })
         return Response(response)
 
