@@ -6,12 +6,13 @@ from urllib.parse import urljoin
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q, Sum, Count
+from django.db.models import Q, Sum, Count, Max, Min
 
 from ErgoAccounting.celery import app
-from core.models import Miner, Balance, Configuration, Share, AggregateShare
+from core.models import Miner, Balance, Configuration, Share, AggregateShare, ExtraInfo
 from core.serializers import BalanceSerializer, ShareSerializer, AggregateShareSerializer
-from core.utils import node_request, get_miner_payment_address
+from core.utils import node_request, get_miner_payment_address, RewardAlgorithm
+from pycoingecko import CoinGeckoAPI
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +59,11 @@ def periodic_withdrawal():
     try:
         logger.info('Periodic withdrawal for #{} miners'.format(len(outputs)))
         # Creating balance object with pending_withdrawal status
-        objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance) for pk, balance in outputs]
+        objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance) for pk, balance in
+                   outputs]
         Balance.objects.bulk_create(objects)
         outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
+        outputs = sorted(outputs)
         generate_and_send_transaction(outputs)
 
     except:
@@ -182,6 +185,28 @@ def immature_to_mature():
     """
     logger.info('running immature to mature task.')
 
+    def make_share_orphaned(share):
+        """
+        makes a share orphaned
+        :param share: the share that needs to be orphaned
+        :return: None
+        """
+        share.is_orphaned = True
+        share.save()
+
+        if share.status == 'solved':
+            # creating equivalent mature balances with negative balance
+            balances = Balance.objects.filter(share=share, status='immature')
+            duplicate_balances = [b for b in balances]
+            balances.update(status='mature')
+            for b in duplicate_balances:
+                b.id = None
+                b.balance = -b.balance
+                b.status = 'mature'
+
+            Balance.objects.bulk_create(duplicate_balances)
+
+    block_threshold = 3
     # getting current height
     res = node_request('info')
     if res['status'] != 'success':
@@ -194,11 +219,43 @@ def immature_to_mature():
 
     # getting all shares with immature balances which have been created at least in CONFIRMATION_LENGTH block ago
     shares = Share.objects.filter(balance__status="immature", block_height__lte=(current_height - CONFIRMATION_LENGTH),
-                                  status='solved').distinct()
+                                  status='solved', is_orphaned=False).distinct().order_by('created_at')
+    # no shares to do anything for
+    if shares.count() == 0:
+        return
+
+    first_one = shares.first()
+    first_valid_share = RewardAlgorithm.get_instance().get_beginning_share(first_one.created_at)
+    all_considered_shares = Share.objects.filter(created_at__lte=shares.last().created_at,
+                                                 created_at__gte=first_valid_share.created_at,
+                                                 status__in=['solved', 'valid'], is_orphaned=False)
+
+    threshold = all_considered_shares.aggregate(max=Max('block_height'), min=Min('block_height'))
+    res = node_request('blocks/chainSlice', params={'fromHeight': threshold['min'] - block_threshold,
+                                                    'toHeight': threshold['max'] + block_threshold})
+    if res['status'] != 'success':
+        logger.error('Can not get headers.json from node, exiting immature_to_mature!')
+        return
+
+    headers = res['response']
+    ids = set(h['id'] for h in headers)
+
+    for share in all_considered_shares:
+        if share.parent_id not in ids or len(ids.intersection(share.next_ids)) > 0:
+            # must be orphaned
+            make_share_orphaned(share)
+
     q = Q()
+    shares = Share.objects.filter(balance__status="immature", block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                  status='solved', is_orphaned=False).distinct().order_by('block_height')
     for share in shares:
         txt_res = node_request('wallet/transactionById', params={'id': share.transaction_id})
         if txt_res['status'] != 'success':
+            res = txt_res['response']
+            if 'error' in res and res['error'] == 404 and 'reason' in res and res['reason'] == 'not-found':
+                # transaction is not in the blockchain
+                make_share_orphaned(share)
+
             logger.error('can not get transaction info from node for id {}! exiting.'.format(share.transaction_id))
             continue
 
@@ -206,6 +263,7 @@ def immature_to_mature():
         num_confirmations = txt_res['numConfirmations']
 
         if num_confirmations >= CONFIRMATION_LENGTH:
+            RewardAlgorithm.get_instance().perform_logic(share)
             q |= Q(status="immature", share=share)
 
     if len(q) > 0:
@@ -235,9 +293,11 @@ def aggregate():
     solved = Share.objects.filter(status='solved').order_by('-created_at')
     if solved.count() > settings.KEEP_BALANCE_WITH_DETAIL_NUM:
         balance_solved_share = solved[settings.KEEP_BALANCE_WITH_DETAIL_NUM]
-        bal_mature_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at, status="mature") \
+        bal_mature_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at,
+                                                        status="mature") \
             .values('miner').annotate(balance=Sum('balance'), num=Count('id'))
-        bal_withdraw_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at, status="withdraw") \
+        bal_withdraw_aggregation = Balance.objects.filter(created_at__lte=balance_solved_share.created_at,
+                                                          status="withdraw") \
             .values('miner').annotate(balance=Sum('balance'), num=Count('id'))
 
         new_balances = [Balance(miner_id=bal['miner'], balance=bal['balance'], status="mature")
@@ -330,3 +390,36 @@ def aggregate():
             if len(aggregated) > 0:
                 with open(shares_aggregate_file, 'a') as file:
                     file.write('\n'.join(aggregated) + '\n')
+
+
+@app.task
+def get_ergo_price():
+    """
+    gets ergo price in usd and btc and save them in DB
+    """
+    try:
+        res = CoinGeckoAPI().get_price(ids='ergo', vs_currencies=['usd', 'btc'])
+        usd_price = res['ergo']['usd']
+        btc_price = res['ergo']['btc']
+        usd = ExtraInfo.objects.filter(key='ERGO_PRICE_USD').first()
+        btc = ExtraInfo.objects.filter(key='ERGO_PRICE_BTC').first()
+
+        if usd:
+            logger.info('updating ergo price in usd.')
+            usd.value = str(usd_price)
+            usd.save()
+        else:
+            ExtraInfo.objects.create(key='ERGO_PRICE_USD', value=str(usd_price))
+            logger.info('created ergo price in usd.')
+
+        if btc:
+            logger.info('updating ergo price in btc.')
+            btc.value = str(btc_price)
+            btc.save()
+        else:
+            ExtraInfo.objects.create(key='ERGO_PRICE_BTC', value=str(btc_price))
+            logger.info('created ergo price in usd.')
+
+    except Exception as ex:
+        print(ex)
+        logger.error('problem getting ergo price!')

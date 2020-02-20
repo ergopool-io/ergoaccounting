@@ -1,7 +1,6 @@
 from django.db.models import Count, Q, Sum
 from django.db import transaction
 
-from ErgoAccounting.production import API_KEY, NODE_ADDRESS
 from .models import Share, Balance, Configuration, Address
 from django.utils import timezone
 from urllib.parse import urljoin
@@ -16,6 +15,8 @@ logger = logging.getLogger(__name__)
 ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
 MAX_PAGINATION_SIZE = getattr(settings, "MAX_PAGINATION_SIZE")
 DEFAULT_PAGINATION_SIZE = getattr(settings, "DEFAULT_PAGINATION_SIZE")
+API_KEY = getattr(settings, "API_KEY")
+NODE_ADDRESS = getattr(settings, "NODE_ADDRESS")
 
 
 class RewardAlgorithm(metaclass=abc.ABCMeta):
@@ -38,21 +39,17 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         if not self.should_run_reward_algorithm(share):
             return
 
-        with transaction.atomic():
-            # delete all related balances if it's not the first execution
-            # of prop function (according to the input share)
-            Balance.objects.filter(share=share).delete()
-            # finding the penultimate valid share
+        # finding the penultimate valid share
+        beginning_share = self.get_beginning_share(share.created_at)
+        shares = Share.objects.filter(
+            created_at__lte=share.created_at,
+            created_at__gte=beginning_share.created_at,
+            is_orphaned=False,
+            status__in=["solved", "valid"],
+        )
 
-            beginning_share = self.get_beginning_share(share.created_at)
-            shares = Share.objects.filter(
-                created_at__lte=share.created_at,
-                created_at__gte=beginning_share.created_at,
-                status__in=["solved", "valid"],
-            )
-
-            # share reward for these shares
-            self.create_balance_from_share(shares, share)
+        # share reward for these shares
+        self.create_balance_from_share(shares, share)
 
         return
 
@@ -80,8 +77,8 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
             return class_()
 
         except:
-            logger.error('Defined reward algorithm in configuration is not valid, {}' .format(algorithm))
-            raise ValueError('Defined reward algorithm in configuration is not valid, {}' .format(algorithm))
+            logger.error('Defined reward algorithm in configuration is not valid, {}'.format(algorithm))
+            raise ValueError('Defined reward algorithm in configuration is not valid, {}'.format(algorithm))
 
     def should_run_reward_algorithm(self, share):
         """
@@ -123,23 +120,39 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         # total reward per solved block, i.e, TOTAL_REWARD - FEE
         REWARD = self.get_reward_to_share()
         # total number of valid shares in this block mining round
-        # total_number_of_shares = shares.count()
+        # total_contribution = shares.count()
         # a list of (miner's primary key, miner's valid shares) for this block mining round
         # miners_share_count = shares.values_list('miner').annotate(Count('difficulty'))
-        miners_share_count = self.get_miner_shares(shares)
-        total_number_of_shares = sum(share for _, share in miners_share_count)
+        miners_share_count = list(self.get_miner_shares(shares))
+        total_contribution = sum(share for _, share in miners_share_count)
 
+        # delete all related balances if it's not the first execution
+        # of prop function (according to the input share)
+        # TODo
+        # Balance.objects.filter(share=share).delete()
+        prev_balances = Balance.objects.filter(share=last_solved_share).values('miner').annotate(balance=Sum('balance'))
+        miner_to_prev_balances = {bal['miner']: bal['balance'] for bal in prev_balances}
+        all_considered_miners = set(list(miner_to_prev_balances.keys()) + [x[0] for x in miners_share_count])
 
+        miner_to_contribution = {miner: contribution for (miner, contribution) in miners_share_count}
         with transaction.atomic():
             # define "balances" as a list to create and save balance objects
             balances = list()
             # for each miner, create a new balance and calculate it's reward and save it
-            for (miner_id, share_count) in miners_share_count:
-                balances.append(Balance(
-                    miner_id=miner_id,
-                    share=last_solved_share,
-                    balance=min(MAX_REWARD, int(REWARD * (share_count / total_number_of_shares))))
-                )
+            # for (miner_id, share_count) in miners_share_count:
+            for miner_id in all_considered_miners:
+                contribution = miner_to_contribution.get(miner_id, 0)
+                miner_reward = min(MAX_REWARD, int(REWARD * (contribution / total_contribution)))
+                miner_prev_reward = miner_to_prev_balances.get(miner_id, 0)
+                if miner_reward != miner_prev_reward:
+                    # here we should either increase immature balances or create orphaned immature
+                    # balance to decrease miner's reward
+                    balances.append(Balance(
+                        miner_id=miner_id,
+                        share=last_solved_share,
+                        status='immature',
+                        balance=miner_reward - miner_prev_reward)
+                    )
 
             # create and save balances to database
             Balance.objects.bulk_create(balances)
@@ -155,18 +168,20 @@ class Prop(RewardAlgorithm):
         """
         penultimate_solved_share = Share.objects.filter(
             created_at__lt=considered_time,
-            status="solved"
+            status="solved",
+            is_orphaned=False
         ).order_by('-created_at').first()
 
         beginning_share = Share.objects.all(). \
-            filter(status__in=['solved', 'valid']).order_by('created_at').first()
+            filter(status__in=['solved', 'valid'], is_orphaned=False).order_by('created_at').first()
 
         # there are more than one solved
         if penultimate_solved_share is not None:
             beginning_share = Share.objects.filter(
                 created_at__lte=considered_time,
                 created_at__gt=penultimate_solved_share.created_at,
-                status__in=['valid', 'solved']
+                status__in=['valid', 'solved'],
+                is_orphaned=False
             ).order_by('created_at').first()
 
         return beginning_share
@@ -182,7 +197,8 @@ class PPLNS(RewardAlgorithm):
         N = Configuration.objects.PPLNS_N
         prev_shares = Share.objects.filter(
             created_at__lte=considered_time,
-            status__in=["solved", "valid"]
+            status__in=["solved", "valid"],
+            is_orphaned=False
         ).order_by('-created_at')
 
         # more than N shares, slicing
@@ -217,7 +233,7 @@ def compute_hash_rate(by, to=timezone.now(), pk=None):
         miners[share['miner__public_key']]['hash_rate'] = int((share['difficulty__sum'] / time) + 1)
         total_hash_rate = total_hash_rate + share['difficulty__sum'] if not pk else 0
 
-    miners.update({'total_hash_rate': int((total_hash_rate / time) + 1)}) if not pk else None
+    miners.update({'total_hash_rate': int((total_hash_rate / time) + 1)})
     return miners
 
 
