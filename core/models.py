@@ -8,6 +8,18 @@ from frozendict import frozendict
 
 logger = logging.getLogger(__name__)
 
+EXTRA_INFO_KEY_CHOICES = (
+    ('ERGO_PRICE_USD', 'price of ergo in USD'),
+    ('ERGO_PRICE_BTC', 'price of ergo in BTC')
+)
+
+EXTRA_INFO_KEY_TYPE = frozendict({
+    'ERGO_PRICE_USD': 'float',
+    'ERGO_PRICE_BTC': 'float'
+})
+
+
+
 CONFIGURATION_KEY_CHOICE = (
     # total reward of a round
     ("TOTAL_REWARD", "TOTAL_REWARD"),
@@ -92,7 +104,7 @@ class Address(models.Model):
         ("withdraw", "withdraw address")
     )
 
-    address = models.CharField(max_length=255, blank=False, null=False)
+    address = models.CharField(max_length=255, blank=False, null=False, unique=True)
     category = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
     address_miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -123,11 +135,25 @@ class Share(models.Model):
     miner_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='miner_addresses')
     lock_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='lock_addresses')
     withdraw_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='withdraw_addresses')
+    is_orphaned = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return '{}-{}'.format(self.miner.public_key, self.share)
+
+
+class MinerIP(models.Model):
+    miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
+    ip = models.GenericIPAddressField(null=False, blank=False, default="1.1.1.1")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ["miner", "ip"]
+
+    def __str__(self):
+        return self.miner.public_key
 
 
 class Balance(models.Model):
@@ -152,6 +178,10 @@ class Balance(models.Model):
 
     def __str__(self):
         return '{}-{}'.format(str(self.miner), self.balance)
+
+    @property
+    def is_orphaned(self):
+        return self.status == 'mature' and self.balance < 0
 
 
 class AggregateShare(models.Model):
@@ -205,3 +235,13 @@ class Configuration(models.Model):
 
     def __str__(self):
         return self.key + ":" + str(self.value)
+
+
+class ExtraInfo(models.Model):
+    key = models.CharField(max_length=255, choices=EXTRA_INFO_KEY_CHOICES, blank=False, unique=True)
+    value = models.CharField(max_length=255, blank=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.key + ": " + str(self.value)
