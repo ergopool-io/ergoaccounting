@@ -239,7 +239,6 @@ def immature_to_mature():
 
     headers = res['response']
     ids = set(h['id'] for h in headers)
-    chain = [{"height": h['height'], "transaction_id": h['transactionsId']} for h in headers]
 
     for share in all_considered_shares:
         if share.parent_id not in ids or len(ids.intersection(share.next_ids)) > 0:
@@ -249,6 +248,18 @@ def immature_to_mature():
     q = Q()
     shares = Share.objects.filter(balance__status="immature", block_height__lte=(current_height - CONFIRMATION_LENGTH),
                                   status='solved', is_orphaned=False).distinct().order_by('block_height')
+    transactions = {}
+    for id_block in ids:
+        data_node = node_request('/blocks/{}'.format(id_block))
+        if data_node['status'] != 'success':
+            if data_node['response'].get('reason') == 'not-found':
+                continue
+            logger.error('Can not get headers from node, exiting immature_to_mature!')
+            logger.error(data_node['response'])
+            return
+        transactions[data_node['response']['header']['height']] =\
+            [tx['id'] for tx in data_node['response']['blockTransactions']['transactions']]
+
     for share in shares:
         txt_res = node_request('wallet/transactionById', params={'id': share.transaction_id})
         if txt_res['status'] != 'success':
@@ -256,12 +267,13 @@ def immature_to_mature():
             if 'error' in res and res['error'] == 404 and 'reason' in res and res['reason'] == 'not-found':
                 # transaction is not in the blockchain
                 make_share_orphaned(share)
-            if {"height": share.block_height, "transaction_id": share.transaction_id} not in chain:
-                # transaction is not in the chain slice
-                make_share_orphaned(share)
 
             logger.error('can not get transaction info from node for id {}! exiting.'.format(share.transaction_id))
             continue
+
+        if share.transaction_id not in transactions.get(share.block_height, []):
+            # transaction is not in the block of this share
+            make_share_orphaned(share)
 
         txt_res = txt_res['response']
         num_confirmations = txt_res['numConfirmations']

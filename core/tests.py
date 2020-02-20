@@ -1966,6 +1966,15 @@ class ImmatureToMatureTestCase(TestCase):
                 'response': headers
             }
 
+        if 'blocks' in url:
+            headers = json.loads(open('core/data_mock_testing/block_transactions.json').read())
+            headers['header']['id'] = str(url.split('/')[2])
+            headers['header']['height'] = int(url.split('/')[2])
+            return {
+                'response': headers,
+                'status': 'success'
+            }
+
         return {
             'response': None,
             'status': 'error'
@@ -1998,14 +2007,14 @@ class ImmatureToMatureTestCase(TestCase):
             # not important shares
             num_confirmation = CONFIRMATION_LENGTH + 10
             block_height = self.CURRENT_HEIGHT - num_confirmation
-            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            tx_id = '_'.join([str(i), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
                                  block_height=block_height, status='valid', parent_id='1')
 
             # confirmed shares
             num_confirmation = CONFIRMATION_LENGTH + 10
             block_height = self.CURRENT_HEIGHT - num_confirmation
-            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            tx_id = '_'.join([str(i), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
                                  block_height=block_height, status='solved', parent_id='1')
 
