@@ -220,37 +220,6 @@ class ShareTestCase(TestCase):
         self.client.post('/shares/', data, format='json')
         self.assertEqual(MinerIP.objects.filter(miner=miner).count(), 2)
 
-    def test_validate_unsolved_share_store_addresses(self):
-        """
-        test if a non-solution submitted share must store with None in transaction_id and block_height
-        3 address must be generated for miner
-        """
-        share = uuid.uuid4().hex
-        data = {'share': share,
-                'miner': '1',
-                'nonce': '1',
-                "transaction_id": "this is a transaction id",
-                "block_height": 40404,
-                'parent_id': 'test',
-                'next_ids': [],
-                'client_ip': '127.0.0.1',
-                'path': '-1',
-                'status': 'valid',
-                'difficulty': 123456}
-        data.update(self.addresses)
-        self.client.post('/shares/', data, format='json')
-        self.assertEqual(Share.objects.filter(share=share).count(), 1)
-        transaction = Share.objects.filter(share=share).first()
-        self.assertIsNone(transaction.transaction_id)
-        self.assertIsNone(transaction.block_height)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['miner_address'],
-                                                category='miner').count(), 1)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['lock_address'],
-                                                category='lock').count(), 1)
-        self.assertEqual(
-            Address.objects.filter(address_miner__public_key='1', address=self.addresses['withdraw_address'],
-                                   category='withdraw').count(), 1)
-
     def test_validate_unsolved_share_update_last_used(self):
         """
         test if a non-solution submitted share must store with None in transaction_id and block_height
@@ -1265,7 +1234,7 @@ class TransactionGenerateTestCase(TestCase):
             Balance(miner=Miner.objects.get(public_key=x[0]), balance=-x[1], status="pending_withdrawal") for x in
             self.outputs]
         for pk, _ in self.outputs:
-            Address.objects.create(address_miner=Miner.objects.get(public_key=pk), category='withdraw', address=pk)
+            Address.objects.create(address_miner=Miner.objects.get(public_key=pk), category='miner', address=pk)
 
     def test_generate_three_transactions_max_num_output_4(self, mocked_request):
         """
@@ -1415,7 +1384,7 @@ class TransactionGenerateTestCase(TestCase):
         generate_and_send_transaction(outputs)
 
         for pk, value, _ in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw").count(), 0)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="miner").count(), 0)
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
 
