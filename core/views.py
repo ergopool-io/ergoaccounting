@@ -238,7 +238,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
             Q(balance__status='immature') |
             Q(balance__status='mature')
         ).values('block_height').annotate(balance=Sum('balance__balance'))[:NUMBER_OF_LAST_INCOME]
-        logger.debug("Get income for miner {}".format(miner.public_key))
+        logger.debug("Get income for miner {}".format(miner.public_key if miner else ''))
         response = [{'height': obj['block_height'], 'balance': obj['balance']} for obj in share]
         return Response(response)
 
@@ -273,7 +273,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         stop_frame = int(stop / PERIOD_DIAGRAM)
         prev_chunks = int(TOTAL_PERIOD_HASH_RATE / PERIOD_DIAGRAM)
         tz = get_current_timezone()
-        logger.info('computing hash rate for pk: {}'.format(miner.public_key))
+        logger.info('computing hash rate for pk: {}'.format(miner.public_key if miner else '--'))
         shares = Share.objects.filter(
             Q(miner=miner) &
             Q(created_at__gte=timezone.datetime.fromtimestamp(start - (prev_chunks + 1) * PERIOD_DIAGRAM, tz=tz)) &
@@ -329,7 +329,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
             stop = min(stop, start + (LIMIT_NUMBER_CHUNK_DIAGRAM * PERIOD_DIAGRAM))
         stop_frame = int(stop / PERIOD_DIAGRAM)
         tz = get_current_timezone()
-        logger.info('get shares valid and invalid for miner: {}'.format(miner.public_key))
+        logger.info('get shares valid and invalid for miner: {}'.format(miner.public_key if miner else ""))
         # Add share from table share and split with status 'valid', 'solved' and 'invalid', 'repetitious'
         shares = Share.objects.filter(
             Q(miner=miner) &
@@ -595,7 +595,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         count_miner = Miner.objects.count()
         # Get blocks solved in past hour
         shares = Share.objects.filter(
-            Q(created_at__range=(timezone.now() - timedelta(seconds=3600), timezone.now())) &
+            Q(created_at__range=(timezone.now() - timedelta(seconds=24 * 3600), timezone.now())) &
             Q(status='solved')
         ).values('transaction_id')
         # Check should be there is transaction_id in the wallet
@@ -633,7 +633,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 'btc': price_btc,
                 'usd': price_usd
             },
-            "blocks_in_hour": count / 3600
+            "blocks_in_hour": count / 24
         }
 
         return Response(response)
