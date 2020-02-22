@@ -359,13 +359,9 @@ class BlockDataIterable(object):
 def get_miner_payment_address(miner):
     """
     :param miner: a miner object
-    :return: selected_address associated with miner address if one selected
-             or the last used withdraw address. returns None if no withdraw address is available
+    :return: miner address associated with the given miner
     """
-    if miner.selected_address is not None:
-        return miner.selected_address.address
-
-    address = Address.objects.filter(address_miner=miner, category='withdraw').order_by('-last_used').first()
+    address = Address.objects.filter(address_miner=miner, category='miner').order_by('-last_used').first()
     if address is not None:
         return address.address
 

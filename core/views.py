@@ -65,12 +65,12 @@ class ShareView(viewsets.GenericViewSet,
         if not rep_share:
             logger.info('New share, saving.')
             if _status in ["solved", "valid"]:
-                miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address').lower(),
+                miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
                                                               address_miner=miner, category='miner')[0]
-                lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address').lower(),
+                lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
                                                              address_miner=miner, category='lock')[0]
                 withdraw_address = \
-                    Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address').lower(),
+                    Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
                                                   address_miner=miner, category='withdraw')[0]
                 # updating updated_at field
                 miner_address.save()
@@ -493,25 +493,6 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
     serializer_class = MinerSerializer
     queryset = Miner.objects.all()
     lookup_field = 'public_key'
-
-    @action(detail=True, methods=['post'])
-    def set_address(self, request, public_key=None):
-        """
-        miner can set it's preferred address
-        """
-        miner = self.get_object()
-        address = request.data.get('address', None)
-        if address is None:
-            return Response({'message': 'address field must be present.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        miner_address = Address.objects.filter(address_miner=miner, address=address).first()
-        if miner_address is None:
-            return Response({'message': "provided address is not present in miner's address list."},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        miner.selected_address = miner_address
-        miner.save()
-        return Response({'message': 'address successfully was set for miner.'}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], name='withdrawal')
     def withdraw(self, request, public_key=None):
