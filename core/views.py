@@ -65,12 +65,12 @@ class ShareView(viewsets.GenericViewSet,
         if not rep_share:
             logger.info('New share, saving.')
             if _status in ["solved", "valid"]:
-                miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address').lower(),
+                miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
                                                               address_miner=miner, category='miner')[0]
-                lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address').lower(),
+                lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
                                                              address_miner=miner, category='lock')[0]
                 withdraw_address = \
-                    Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address').lower(),
+                    Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
                                                   address_miner=miner, category='withdraw')[0]
                 # updating updated_at field
                 miner_address.save()
