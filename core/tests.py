@@ -21,7 +21,7 @@ from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance
     CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
 from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction, get_ergo_price
-from core.utils import RewardAlgorithm, compute_hash_rate, get_miner_payment_address
+from core.utils import RewardAlgorithm, get_miner_payment_address
 
 
 def random_string(length=10):
@@ -562,15 +562,15 @@ class UserApiTestCase(TestCase):
             Share.objects.create(share=random_string(), miner=miners[0], status="solved",
                                  created_at=self.now, difficulty=1000),
             Share.objects.create(share=random_string(), miner=miners[0], status="valid",
-                                 created_at=self.now + timedelta(minutes=1), difficulty=1000),
+                                 created_at=self.now + timedelta(minutes=1), difficulty=98761234),
             Share.objects.create(share=random_string(), miner=miners[0], status="valid",
-                                 created_at=self.now + timedelta(minutes=2), difficulty=1000),
+                                 created_at=self.now + timedelta(minutes=2), difficulty=54329876),
             Share.objects.create(share=random_string(), miner=miners[0], status="invalid",
                                  created_at=self.now + timedelta(minutes=3), difficulty=1000),
             Share.objects.create(share=random_string(), miner=miners[1], status="valid",
-                                 created_at=self.now + timedelta(minutes=4), difficulty=1000),
+                                 created_at=self.now + timedelta(minutes=4), difficulty=1234504321),
             Share.objects.create(share=random_string(), miner=miners[1], status="valid",
-                                 created_at=self.now + timedelta(minutes=5), difficulty=1000),
+                                 created_at=self.now + timedelta(minutes=5), difficulty=67890987),
         ]
 
         # Create balances
@@ -596,52 +596,41 @@ class UserApiTestCase(TestCase):
             'round_valid_shares': 4,
             'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
-            'hash_rate': 1
+            "hash_rate": {
+                "current": 808604,
+                "avg": 16845
+            },
             'users': {
                 'abc': {
                     "round_valid_shares": 2,
-                    "round_invalid_shares": 0,
+                    "round_invalid_shares": 1,
                     "immature": 300,
                     "mature": 300,
                     "withdraw": 400,
-                    "hash_rate": 1
+                    "hash_rate": {
+                        "current": 85051,
+                        "avg": 1771
+                    },
                 },
                 'xyz': {
                     "round_valid_shares": 2,
-                    "round_invalid_shares": 1,
+                    "round_invalid_shares": 0,
                     "immature": 0,
                     "mature": 1100,
                     "withdraw": 0,
-                    "hash_rate": 1
+                    "hash_rate": {
+                        "current": 723552,
+                        "avg": 15074
+                    },
                 }
             }
         }
         """
         response = self.client.get('/user/').json()
-        self.assertDictEqual(response, {
-            'round_valid_shares': 4,
-            'round_invalid_shares': 1,
-            'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
-            'hash_rate': 1,
-            'users': {
-                'abc': {
-                    "round_valid_shares": 2,
-                    "round_invalid_shares": 1,
-                    "immature": 300,
-                    "mature": 300,
-                    "withdraw": 400,
-                    "hash_rate": 1
-                },
-                'xyz': {
-                    "round_valid_shares": 2,
-                    "round_invalid_shares": 0,
-                    "immature": 0,
-                    "mature": 1100,
-                    "withdraw": 0,
-                    "hash_rate": 1
-                }
-            }
-        })
+        with open("core/data_testing/user_api_all.json", "r") as read_file:
+            file = json.load(read_file)
+        file['timestamp'] = self.now.strftime("%Y-%m-%d %H:%M:%S")
+        self.assertDictEqual(response, file)
 
     def test_get_specified_pk(self):
         """
@@ -653,26 +642,13 @@ class UserApiTestCase(TestCase):
         * Content-Type is application/json
         * Content is :
         {
-            'round_shares': 4,
-            'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
-            'users': {
-                'abc': {
-                    "round_shares": 2,
-                    "immature": 300,
-                    "mature": 300,
-                    "withdraw": 400,
-                    "hash_rate": 1
-                }
-            }
-        }
-        """
-        content = self.client.get('/user/abc/')
-        response = content.json()
-        self.assertDictEqual(response, {
             'round_valid_shares': 4,
             'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
-            'hash_rate': 1,
+            "hash_rate": {
+                "current": 808604,
+                "avg": 16845
+            },
             'users': {
                 'abc': {
                     "round_valid_shares": 2,
@@ -680,10 +656,20 @@ class UserApiTestCase(TestCase):
                     "immature": 300,
                     "mature": 300,
                     "withdraw": 400,
-                    "hash_rate": 1
+                    "hash_rate": {
+                        "current": 85051,
+                        "avg": 1771
+                    }
                 }
             }
-        })
+        }
+        """
+        content = self.client.get('/user/abc/')
+        response = content.json()
+        with open("core/data_testing/user_api_specified_pk.json", "r") as read_file:
+            file = json.load(read_file)
+        file['timestamp'] = self.now.strftime("%Y-%m-%d %H:%M:%S")
+        self.assertDictEqual(response, file)
 
 
 class ConfigurationAPITest(TestCase):
@@ -1011,58 +997,6 @@ class PPLNSFunctionTest(TestCase):
         Configuration.objects.all().delete()
 
 
-class ComputeHashRateTest(TransactionTestCase):
-    """
-    For test function compute_hash_rate for calculate
-     hash_rate for one public_key or all public_key between two timestamp.
-
-    """
-    reset_sequences = True
-
-    def test_compute_hash_rate(self):
-        """
-        In this function create 2 miner and 4 share for calculate hash rate between two timestamp.
-        Pass two time_stamp to function compute_hash_rate and get hash_rate between this time_stamps that are
-         'valid' or 'solved'.
-        :return:
-        """
-        # Create objects for test
-
-        Miner.objects.create(nick_name="moein", public_key="12345678976543",
-                             created_at=datetime(2019, 12, 22, 8, 33, 45, 395985),
-                             updated_at=datetime(2019, 12, 22, 8, 33, 45, 395985))
-        Miner.objects.create(nick_name="amir", public_key="869675768342",
-                             created_at=datetime(2019, 12, 23, 8, 33, 45, 395985),
-                             updated_at=datetime(2019, 12, 23, 8, 33, 45, 395985))
-        share = Share.objects.create(share="12345", miner_id=1, block_height=23456,
-                                     transaction_id="234567uhgt678", status="solved", difficulty=4253524523)
-        share.created_at = "2019-12-22 14:18:57.395985+00"
-        share.updated_at = "2019-12-22 14:18:57.395985+00"
-        share.save()
-        share = Share.objects.create(share="234567", miner_id=1, block_height=23456,
-                                     transaction_id="234567uhgt678", status="valid", difficulty=4253524523)
-        share.created_at = "2019-12-22 18:18:57.376576+00"
-        share.updated_at = "2019-12-22 18:18:57.376576+00"
-        share.save()
-        share = Share.objects.create(share="8765678", miner_id=2, block_height=23456,
-                                     transaction_id="234567uhgt678", status="solved", difficulty=4253524523)
-        share.created_at = "2019-12-22 20:05:00.376576+00"
-        share.updated_at = "2019-12-22 20:05:00.376576+00"
-        share.save()
-        share = Share.objects.create(share="345678", miner_id=2, block_height=23456,
-                                     transaction_id="234567uhgt678", status="valid", difficulty=4253524523)
-        share.created_at = "2019-12-22 20:00:00.376576+00"
-        share.updated_at = "2019-12-22 20:00:00.376576+00"
-        share.save()
-        # Calculate hash rate
-        miners = compute_hash_rate(datetime(2019, 12, 22, 20, 5, 00, 370000, tzinfo=timezone.utc),
-                                   datetime(2019, 12, 24, 6, 39, 28, 887529, tzinfo=timezone.utc))
-
-        # check the function compute_hash_rate
-        self.assertEqual(miners, {'869675768342': {'hash_rate': 34174},
-                                  'total_hash_rate': 34174})
-
-
 class BlockTestCase(TestCase):
     """
     Test for different modes call api /blocks
@@ -1082,7 +1016,7 @@ class BlockTestCase(TestCase):
             def json(self):
                 return self.json_data
 
-        with open("core/data_mock_testing/test_get_blocks.json", "r") as read_file:
+        with open("core/data_testing/test_get_blocks.json", "r") as read_file:
             response = json.load(read_file)
         return MockResponse(response)
 
@@ -1175,7 +1109,7 @@ def mocked_node_request_transaction_generate_test(*args, **kwargs):
     url = args[0]
 
     if url == 'wallet/boxes/unspent':
-        with open("core/data_mock_testing/test_boxes.json", "r") as read_file:
+        with open("core/data_testing/test_boxes.json", "r") as read_file:
             return {
                 'response': json.load(read_file),
                 'status': 'success'
@@ -1928,7 +1862,7 @@ class ImmatureToMatureTestCase(TestCase):
             params = kwargs['params']
             # min_h = int(params['fromHeight'])
             # max_h = int(params['toHeight'])
-            headers = json.loads(open('core/data_mock_testing/headers.json').read())
+            headers = json.loads(open('core/data_testing/headers.json').read())
             return {
                 'status': 'success',
                 # 'response': headers[min_h - 1:max_h]

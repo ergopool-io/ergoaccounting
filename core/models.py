@@ -32,8 +32,6 @@ CONFIGURATION_KEY_CHOICE = (
     # maximum reward anyone can receive in reward sharing
     ("MAX_REWARD", "MAX_REWARD"),
     ("PPLNS_N", "PPLNS_N"),
-    # period time of hash rate
-    ("PERIOD_TIME", "HASH_PERIOD_TIME"),
     # reward algorithm used for sharing reward
     ("REWARD_ALGORITHM", "REWARD_ALGORITHM"),
     # transaction fee of a transaction, 0.001
@@ -57,7 +55,6 @@ CONFIGURATION_KEY_TO_TYPE = frozendict({
     "REWARD_FACTOR_PRECISION": "int",
     "MAX_REWARD": "int",
     "PPLNS_N": "int",
-    "PERIOD_TIME": "float",
     'REWARD_ALGORITHM': 'str',
     'TRANSACTION_FEE': 'int',
     "MAX_NUMBER_OF_OUTPUTS": 'int',
@@ -74,7 +71,6 @@ CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
     "REWARD_FACTOR_PRECISION": 2,
     'MAX_REWARD': int(35e9),
     'PPLNS_N': 5,
-    'PERIOD_TIME': 24 * 60 * 60,
     'REWARD_ALGORITHM': 'Prop',
     'TRANSACTION_FEE': 1000000,
     "MAX_NUMBER_OF_OUTPUTS": 5,
