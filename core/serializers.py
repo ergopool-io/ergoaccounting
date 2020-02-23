@@ -83,6 +83,28 @@ class ConfigurationSerializer(serializers.ModelSerializer):
         model = Configuration
         fields = ['key', 'value']
 
+    def create(self, validated_data):
+        key = validated_data['key']
+        value = validated_data['value']
+        configurations = Configuration.objects.filter(key=key)
+        val_type = CONFIGURATION_KEY_TO_TYPE[key]
+        try:
+            locate(val_type)(value)
+
+        except:
+            return
+
+        if not configurations:
+            logger.info('Saving new configuration.')
+            super().create(validated_data)
+        else:
+            logger.info('Updating configuration')
+            configuration = Configuration.objects.get(key=key)
+            configuration.value = value
+            configuration.save()
+
+    def save(self, **kwargs):
+        pass
 
 class MinerSerializer(serializers.ModelSerializer):
     class Meta:

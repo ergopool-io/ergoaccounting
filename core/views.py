@@ -130,24 +130,28 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
         :param kwargs:
         :return:
         """
-        key = serializer.validated_data['key']
-        value = serializer.validated_data['value']
-        configurations = Configuration.objects.filter(key=key)
-        val_type = CONFIGURATION_KEY_TO_TYPE[key]
-        try:
-            locate(val_type)(value)
+        if serializer.is_valid():
+            serializer.create(serializer.validated_data)
 
-        except:
-            return
+    @action(detail=False, methods=['POST'], name='batch_create')
+    def batch_create(self, request):
+        """
+        this method creates or updates configuration with batch request like following:
+        {
+            "x": "y",
+            "a": "b
+        }
+        """
+        confs = []
+        for key, value in request.data.items():
+            confs.append({'key': key, 'value': value})
 
-        if not configurations:
-            logger.info('Saving new configuration.')
+        serializer = self.get_serializer(data=confs, many=True)
+        if serializer.is_valid():
             serializer.save()
-        else:
-            logger.info('Updating configuration')
-            configuration = Configuration.objects.get(key=key)
-            configuration.value = value
-            configuration.save()
+            return Response(request.data, status=status.HTTP_200_OK)
+
+        return Response({'message': 'Some fields are not valid.', "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
     def list(self, request, *args, **kwargs):
         """
