@@ -739,6 +739,23 @@ class ConfigurationAPITest(TestCase):
             # check the value of the new created object
             self.assertEqual(configuration.value, '1')
 
+    def test_configuration_batch_create(self):
+        """
+        create or update configuration using batch configs
+        """
+        keys = [key for (key, temp) in CONFIGURATION_KEY_CHOICE]
+        Configuration.objects.create(key=keys[0], value="dummy_value")
+        batch = {}
+        for ind, key in enumerate(keys):
+            batch[key] = str(ind)
+
+        self.client.post('/conf/batch_create/', batch)
+
+        for ind, key in enumerate(keys):
+            self.assertEqual(Configuration.objects.filter(key=key).count(), 1)
+            conf = Configuration.objects.filter(key=key).first()
+            self.assertEqual(conf.value, str(ind))
+
     def test_configuration_api_post_method_update(self):
         """
         In this scenario we want to test the functionality of Configuration API when
