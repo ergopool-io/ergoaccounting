@@ -1499,8 +1499,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner2.save()
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
         periodic_withdrawal()
-        mocked_generate_txs.assert_has_calls([call(sorted([(miner1.public_key, int(80e9), max_id + 2),
-                                                    (miner2.public_key, int(80e9), max_id + 1)]))])
+        mocked_generate_txs.assert_has_calls([call(sorted([(miner1.public_key, int(80e9), max_id + 1),
+                                                           (miner2.public_key, int(80e9), max_id + 2)]))])
         for miner in [miner1, miner2]:
             self.assertEqual(
                 Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(), 1)
@@ -1548,8 +1548,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner1 = self.miners[0]
         Balance.objects.create(miner=miner1, balance=int(-80e9), status="mature")
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        outputs = [(miner.public_key, int(110e9), max_id + 1 + i) for i, miner in enumerate(self.miners[1:])]
-        outputs = sorted(outputs)
+        pks = sorted([m.public_key for m in self.miners[1:]])
+        outputs = [(pk, int(110e9), max_id + 1 + i) for i, pk in enumerate(pks)]
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call(outputs)])
 
@@ -1568,7 +1568,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner1 = self.miners[0]
         Balance.objects.filter(miner=miner1).delete()
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        outputs = [(miner.public_key, int(110e9), max_id + 1 + i) for i, miner in enumerate(self.miners[1:])]
+        pks = sorted([m.public_key for m in self.miners[1:]])
+        outputs = [(pk, int(110e9), max_id + 1 + i) for i, pk in enumerate(pks)]
         outputs = sorted(outputs)
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call(outputs)])
@@ -2062,7 +2063,7 @@ class ImmatureToMatureTestCase(TestCase):
 
         confirmed_shares_id = [x.id for x in Share.objects.filter(balance__status='immature',
                                                                   block_height__lte=(
-                                                                              current_height - CONFIRMATION_LENGTH),
+                                                                          current_height - CONFIRMATION_LENGTH),
                                                                   status='solved').distinct() if
                                x.id not in cur_unconfirmed]
 
@@ -2927,6 +2928,7 @@ class GetMinerAddressTestCase(TestCase):
     """
     Test class for ergo price creation and get
     """
+
     def mock_get_price(*args, **kwargs):
         return {'ergo': {'btc': 10.1, 'usd': 11.1}}
 
