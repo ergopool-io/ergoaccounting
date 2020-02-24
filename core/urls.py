@@ -8,7 +8,6 @@ router.register(r'balance', BalanceView)
 router.register(r'conf', ConfigurationViewSet)
 router.register(r'user', UserApiViewSet, basename='ApiUser')
 router.register(r'blocks', BlockView, basename='Blocks')
-router.register(r'miner', MinerView, basename='Miners')
 router.register(r'info', InfoViewSet, basename='Info')
 
 urlpatterns = router.urls
