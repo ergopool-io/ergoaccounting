@@ -15,12 +15,13 @@ from rest_framework.pagination import PageNumberPagination, LimitOffsetPaginatio
 from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
-    LIMIT_NUMBER_CHUNK_DIAGRAM, API_KEY, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT
+    LIMIT_NUMBER_CHUNK_DIAGRAM, API_KEY, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT,\
+    TOTAL_PERIOD_COUNT_SHARE
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, EXTRA_INFO_KEY_TYPE
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from core.tasks import generate_and_send_transaction
-from core.utils import compute_hash_rate, RewardAlgorithm, BlockDataIterable, node_request
+from core.utils import RewardAlgorithm, BlockDataIterable, node_request
 
 logger = logging.getLogger(__name__)
 
@@ -129,24 +130,28 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
         :param kwargs:
         :return:
         """
-        key = serializer.validated_data['key']
-        value = serializer.validated_data['value']
-        configurations = Configuration.objects.filter(key=key)
-        val_type = CONFIGURATION_KEY_TO_TYPE[key]
-        try:
-            locate(val_type)(value)
+        if serializer.is_valid():
+            serializer.create(serializer.validated_data)
 
-        except:
-            return
+    @action(detail=False, methods=['POST'], name='batch_create')
+    def batch_create(self, request):
+        """
+        this method creates or updates configuration with batch request like following:
+        {
+            "x": "y",
+            "a": "b
+        }
+        """
+        confs = []
+        for key, value in request.data.items():
+            confs.append({'key': key, 'value': value})
 
-        if not configurations:
-            logger.info('Saving new configuration.')
+        serializer = self.get_serializer(data=confs, many=True)
+        if serializer.is_valid():
             serializer.save()
-        else:
-            logger.info('Updating configuration')
-            configuration = Configuration.objects.get(key=key)
-            configuration.value = value
-            configuration.save()
+            return Response(request.data, status=status.HTTP_200_OK)
+
+        return Response({'message': 'Some fields are not valid.', "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
     def list(self, request, *args, **kwargs):
         """
@@ -398,17 +403,31 @@ class UserApiViewSet(viewsets.GenericViewSet,
         :param round_start_time: round start time
         :return: json contain overall parameters
         """
-        # Total shares count of this round
-        total_count = Share.objects.filter(created_at__gt=round_start_time).aggregate(
-            valid=Count("id", filter=Q(status="valid")),
-            invalid=Count("id", filter=Q(status__in=["invalid", "repetitious"]))
+        # Total shares count of this round and sum of difficulty in different period
+        total_count = Share.objects.aggregate(
+            valid=Count("id", filter=Q(created_at__gt=round_start_time) & Q(status="valid")),
+            invalid=Count("id", filter=Q(created_at__gt=round_start_time) & Q(status__in=["invalid", "repetitious"])),
+            sum_period_diagram_difficulty=Sum('difficulty', filter=Q(
+                created_at__gte=(timezone.now() - timedelta(seconds=PERIOD_DIAGRAM))
+            ) & Q(
+                status__in=['valid', 'solved']
+            )),
+            sum_total_difficulty=Sum('difficulty', filter=Q(
+                created_at__gte=(timezone.now() - timedelta(seconds=TOTAL_PERIOD_HASH_RATE))
+            ) & Q(
+                status__in=['valid', 'solved']
+            ))
         )
-        miners_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME))
         return {
             'round_valid_shares': int(total_count.get("valid", 0)),
             'round_invalid_shares': int(total_count.get("invalid", 0)),
             'timestamp': round_start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'hash_rate': int(miners_hash_rate.get('total_hash_rate', 1)),
+            "hash_rate": {
+                # Hash-rate in period PERIOD_DIAGRAM
+                "current": int((total_count.get("sum_period_diagram_difficulty") or 0)/PERIOD_DIAGRAM or 1),
+                # Hash-rate in period TOTAL_PERIOD_HASH_RATE
+                "avg": int((total_count.get("sum_total_difficulty") or 0)/TOTAL_PERIOD_HASH_RATE or 1)
+            }
         }
 
     def get_user_params(self, round_start_time, user_pk=None):
@@ -418,7 +437,6 @@ class UserApiViewSet(viewsets.GenericViewSet,
         :param user_pk: selected user pk or address. if empty response for all users returned
         :return:
         """
-        request = self.request
         # Set the response to be all miners or just one with specified public_key or address of miner
         miners = Miner.objects.filter(
             Q(public_key=user_pk) |
@@ -432,14 +450,19 @@ class UserApiViewSet(viewsets.GenericViewSet,
             immature=Sum('share__balance__balance', filter=Q(share__balance__status="immature")),
             mature=Sum('share__balance__balance', filter=Q(share__balance__status="mature")),
             withdraw=Sum('share__balance__balance', filter=Q(share__balance__status="withdraw")),
+            sum_period_diagram_difficulty=Sum('share__difficulty', filter=Q(
+                share__status__in=['valid', 'solved']
+            ) & Q(
+                share__created_at__gte=(timezone.now() - timedelta(seconds=PERIOD_DIAGRAM))
+            )),
+            sum_total_difficulty=Sum('share__difficulty', filter=Q(
+                share__status__in=['valid', 'solved']
+            ) & Q(
+                share__created_at__gte=(timezone.now() - timedelta(seconds=TOTAL_PERIOD_HASH_RATE))
+            ))
         )
         round_share = round_shares.first() or {}
-        public_key_hash_rate = round_share.get('public_key') if user_pk else None
-        miners_hash_rate = compute_hash_rate(
-            timezone.now() - timedelta(seconds=Configuration.objects.PERIOD_TIME),
-            pk=public_key_hash_rate
-        )
-        logger.info('Current hash rate: {}'.format(miners_hash_rate))
+        logger.info('Get user params for miner: {}'.format(round_share.get('public_key') if user_pk else None))
         response = {}
 
         def convert_row(row_dict):
@@ -449,7 +472,10 @@ class UserApiViewSet(viewsets.GenericViewSet,
                 "immature": int(row_dict.get("immature") or 0),
                 "mature": int(row_dict.get("mature") or 0),
                 "withdraw": int(row_dict.get("withdraw") or 0),
-                "hash_rate": int(miners_hash_rate.get(row_dict.get("public_key"), {}).get("hash_rate") or 1),
+                "hash_rate": {
+                    "current": int((row_dict.get("sum_period_diagram_difficulty") or 0)/PERIOD_DIAGRAM) or 1,
+                    "avg": int((row_dict.get("sum_total_difficulty") or 0)/TOTAL_PERIOD_HASH_RATE) or 1
+                }
             }
         if user_pk:
             response[user_pk] = convert_row(round_shares[0] if len(round_shares) > 0 else {})
@@ -493,25 +519,6 @@ class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
     serializer_class = MinerSerializer
     queryset = Miner.objects.all()
     lookup_field = 'public_key'
-
-    @action(detail=True, methods=['post'])
-    def set_address(self, request, public_key=None):
-        """
-        miner can set it's preferred address
-        """
-        miner = self.get_object()
-        address = request.data.get('address', None)
-        if address is None:
-            return Response({'message': 'address field must be present.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        miner_address = Address.objects.filter(address_miner=miner, address=address).first()
-        if miner_address is None:
-            return Response({'message': "provided address is not present in miner's address list."},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        miner.selected_address = miner_address
-        miner.save()
-        return Response({'message': 'address successfully was set for miner.'}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], name='withdrawal')
     def withdraw(self, request, public_key=None):
@@ -591,12 +598,17 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         for item in items:
             difficulty_network += item.get('difficulty')
         # Calculate HashRate of pool
-        pool_hash_rate = compute_hash_rate(timezone.now() - timedelta(seconds=PERIOD_DIAGRAM))
+        pool_hash_rate = Share.objects.aggregate(
+            sum_total_difficulty=Sum('difficulty', filter=Q(
+                created_at__gte=(timezone.now() - timedelta(seconds=PERIOD_DIAGRAM))
+            ) & Q(
+                status__in=['valid', 'solved']
+            )))
         # Number of miner in table Miner
         count_miner = Miner.objects.count()
         # Get blocks solved in past hour
         shares = Share.objects.filter(
-            Q(created_at__range=(timezone.now() - timedelta(seconds=24 * 3600), timezone.now())) &
+            Q(created_at__gte=(timezone.now() - timedelta(seconds=TOTAL_PERIOD_COUNT_SHARE))) &
             Q(status='solved')
         ).values('transaction_id')
         # Check should be there is transaction_id in the wallet
@@ -614,7 +626,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 logger.debug("response of node api 'wallet/transactionById' {}".format(data_node['response']))
         # Active Miner in past hour
         active_miners_count = Miner.objects.filter(
-            minerip__updated_at__range=(timezone.now() - timedelta(seconds=3600), timezone.now())
+            minerip__updated_at__range=(timezone.now() - timedelta(seconds=PERIOD_ACTIVE_MINERS_COUNT), timezone.now())
         ).distinct().count()
         # Set value of response
 
@@ -626,7 +638,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         response = {
             "hash_rate": {
                 "network": int(difficulty_network/PERIOD_DIAGRAM) + 1,
-                "pool": pool_hash_rate['total_hash_rate']
+                "pool": int((pool_hash_rate.get("sum_total_difficulty") or 0)/PERIOD_DIAGRAM) or 1
             },
             "miners": count_miner,
             "active_miners": active_miners_count,
@@ -634,7 +646,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 'btc': price_btc,
                 'usd': price_usd
             },
-            "blocks_in_hour": count / 24
+            "blocks_in_hour": count / (TOTAL_PERIOD_COUNT_SHARE/3600)
         }
 
         return Response(response)

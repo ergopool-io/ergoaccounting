@@ -32,8 +32,6 @@ CONFIGURATION_KEY_CHOICE = (
     # maximum reward anyone can receive in reward sharing
     ("MAX_REWARD", "MAX_REWARD"),
     ("PPLNS_N", "PPLNS_N"),
-    # period time of hash rate
-    ("PERIOD_TIME", "HASH_PERIOD_TIME"),
     # reward algorithm used for sharing reward
     ("REWARD_ALGORITHM", "REWARD_ALGORITHM"),
     # transaction fee of a transaction, 0.001
@@ -57,7 +55,6 @@ CONFIGURATION_KEY_TO_TYPE = frozendict({
     "REWARD_FACTOR_PRECISION": "int",
     "MAX_REWARD": "int",
     "PPLNS_N": "int",
-    "PERIOD_TIME": "float",
     'REWARD_ALGORITHM': 'str',
     'TRANSACTION_FEE': 'int',
     "MAX_NUMBER_OF_OUTPUTS": 'int',
@@ -74,7 +71,6 @@ CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
     "REWARD_FACTOR_PRECISION": 2,
     'MAX_REWARD': int(35e9),
     'PPLNS_N': 5,
-    'PERIOD_TIME': 24 * 60 * 60,
     'REWARD_ALGORITHM': 'Prop',
     'TRANSACTION_FEE': 1000000,
     "MAX_NUMBER_OF_OUTPUTS": 5,
@@ -89,7 +85,6 @@ class Miner(models.Model):
     nick_name = models.CharField(max_length=255, blank=True)
     public_key = models.CharField(max_length=256, unique=True)
     periodic_withdrawal_amount = models.BigIntegerField(null=True)
-    selected_address = models.ForeignKey('core.Address', on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

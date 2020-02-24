@@ -208,35 +208,6 @@ class PPLNS(RewardAlgorithm):
         return prev_shares[prev_shares.count() - 1]
 
 
-def compute_hash_rate(by, to=timezone.now(), pk=None):
-    """
-    Function for calculate hash_rate between two time_stamp for a specific public_key or all
-    miners in that round.
-    :param by: timestamp for start period
-    :param to: timestamp for end period if `to` not exist set default now time.
-    :param pk: In the event that pk there is.
-    :return: a json of public_key and hash_rate them and total hash_rate
-    """
-    logger.info('computing hash for pk: {}'.format(pk))
-    if pk:
-        shares = Share.objects.values('miner__public_key').filter(miner__public_key=pk).filter(
-            Q(status='valid') | Q(status='solved'), created_at__range=(by, to)).annotate(Sum('difficulty'))
-    else:
-        shares = Share.objects.values('miner__public_key').filter(
-            Q(status='valid') | Q(status='solved'), created_at__range=(by, to)).annotate(Sum('difficulty'))
-
-    time = (to - by).total_seconds()
-    miners = dict()
-    total_hash_rate = 0
-    for share in shares:
-        miners[share['miner__public_key']] = dict()
-        miners[share['miner__public_key']]['hash_rate'] = int((share['difficulty__sum'] / time) + 1)
-        total_hash_rate = total_hash_rate + share['difficulty__sum'] if not pk else 0
-
-    miners.update({'total_hash_rate': int((total_hash_rate / time) + 1)})
-    return miners
-
-
 def node_request(api, header=None, data=None, params=None, request_type="get"):
     """
     Function for request to node
@@ -359,13 +330,9 @@ class BlockDataIterable(object):
 def get_miner_payment_address(miner):
     """
     :param miner: a miner object
-    :return: selected_address associated with miner address if one selected
-             or the last used withdraw address. returns None if no withdraw address is available
+    :return: miner address associated with the given miner
     """
-    if miner.selected_address is not None:
-        return miner.selected_address.address
-
-    address = Address.objects.filter(address_miner=miner, category='withdraw').order_by('-last_used').first()
+    address = Address.objects.filter(address_miner=miner, category='miner').order_by('-last_used').first()
     if address is not None:
         return address.address
 
