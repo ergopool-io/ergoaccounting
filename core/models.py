@@ -21,8 +21,8 @@ EXTRA_INFO_KEY_TYPE = frozendict({
 })
 
 
-
 CONFIGURATION_KEY_CHOICE = (
+    ("POOL_BASE_FACTOR", "Pool base factor"),
     # total reward of a round
     ("TOTAL_REWARD", "TOTAL_REWARD"),
     # total_reward factor
@@ -47,10 +47,15 @@ CONFIGURATION_KEY_CHOICE = (
     # default value for periodic withdrawal if not set by miner explicitly
     ("DEFAULT_WITHDRAW_THRESHOLD", "DEFAULT_WITHDRAW_THRESHOLD"),
     # confirmation length for balances to be mature
-    ("CONFIRMATION_LENGTH", "confirmation length")
+    ("CONFIRMATION_LENGTH", "confirmation length"),
+    # latest allowed height for mining
+    ("THRESHOLD_HEIGHT", "latest allowed height for mining"),
+    # timestamp diff allowed to miner
+    ("THRESHOLD_TIMESTAMP", "timestamp diff allowed to miner"),
 )
 
 CONFIGURATION_KEY_TO_TYPE = frozendict({
+    "POOL_BASE_FACTOR": "int",
     "TOTAL_REWARD": "int",
     "REWARD_FACTOR": "float",
     "FEE_FACTOR": "float",
@@ -63,10 +68,13 @@ CONFIGURATION_KEY_TO_TYPE = frozendict({
     "MAX_WITHDRAW_THRESHOLD": 'int',
     "MIN_WITHDRAW_THRESHOLD": 'int',
     "DEFAULT_WITHDRAW_THRESHOLD": 'int',
-    "CONFIRMATION_LENGTH": 'int'
+    "CONFIRMATION_LENGTH": 'int',
+    "THRESHOLD_HEIGHT": 'int',
+    "THRESHOLD_TIMESTAMP": 'int',
 })
 
 CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
+    'POOL_BASE_FACTOR': 1000,
     'TOTAL_REWARD': int(67.5e9),
     "REWARD_FACTOR": 0.96296297,
     'FEE_FACTOR': 0,
@@ -79,7 +87,9 @@ CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
     "MAX_WITHDRAW_THRESHOLD": int(100e9),
     "MIN_WITHDRAW_THRESHOLD": int(1e9),
     "DEFAULT_WITHDRAW_THRESHOLD": int(100e9),
-    "CONFIRMATION_LENGTH": 720
+    "CONFIRMATION_LENGTH": 720,
+    "THRESHOLD_HEIGHT": 10,
+    "THRESHOLD_TIMESTAMP": 120,
 })
 
 
