@@ -176,8 +176,8 @@ class UserApiViewSet(viewsets.GenericViewSet,
         get object from miner table
         :return: miner input in url(public_key or address)
         """
-        pk = self.kwargs.get('pk').lower()
-        miner = Miner.objects.filter(Q(public_key=pk) | Q(address__address=pk)).distinct()
+        pk = self.kwargs.get('pk')
+        miner = Miner.objects.filter(Q(public_key=pk.lower()) | Q(address__address=pk)).distinct()
         return miner
 
     def get_balance(self):
