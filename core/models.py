@@ -121,6 +121,7 @@ class Share(models.Model):
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     status = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
     transaction_id = models.CharField(max_length=80, blank=True, null=True)
+    transaction_valid = models.BooleanField(blank=True, null=True)
     difficulty = models.BigIntegerField(blank=False)
     block_height = models.BigIntegerField(blank=True, null=True)
     parent_id = models.CharField(max_length=80, null=False, blank=False, default="0")
