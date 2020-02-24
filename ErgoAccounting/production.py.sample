@@ -140,3 +140,7 @@ LIMIT_NUMBER_CHUNK_DIAGRAM = 1000
 NUMBER_OF_LAST_INCOME = 1000
 # time stamp for start payout if not exist
 DEFAULT_START_PAYOUT = 1000000000
+# period for get active miners (1 hour)
+PERIOD_ACTIVE_MINERS_COUNT = 3600
+# count share in specific period 1-Day (second)
+TOTAL_PERIOD_COUNT_SHARE = 24 * 60 * 60

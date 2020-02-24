@@ -38,9 +38,10 @@ def periodic_withdrawal():
     }
 
     # update miners balances, balances with "withdraw", "pending_withdrawal" and "mature" status
-    balances = Balance.objects.filter(status__in=["mature", "withdraw", "pending_withdrawal"])
+    balances = Balance.objects.filter(status__in=["mature", "withdraw", "pending_withdrawal"]).\
+        values('miner__public_key').annotate(balance=Sum('balance'))
     for balance in balances:
-        pk_to_total_balance[balance.miner.public_key] += balance.balance
+        pk_to_total_balance[balance['miner__public_key']] += balance['balance']
 
     DEFAULT_WITHDRAW_THRESHOLD = Configuration.objects.DEFAULT_WITHDRAW_THRESHOLD
     outputs = []
@@ -59,11 +60,11 @@ def periodic_withdrawal():
     try:
         logger.info('Periodic withdrawal for #{} miners'.format(len(outputs)))
         # Creating balance object with pending_withdrawal status
+        outputs = sorted(outputs)
         objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance) for pk, balance in
                    outputs]
         Balance.objects.bulk_create(objects)
         outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
-        outputs = sorted(outputs)
         generate_and_send_transaction(outputs)
 
     except:
