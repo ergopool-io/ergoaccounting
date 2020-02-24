@@ -5,6 +5,8 @@ from django.contrib.postgres.fields import ArrayField
 from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
 from frozendict import frozendict
+from postgres_copy import CopyManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +136,7 @@ class Share(models.Model):
     is_orphaned = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = CopyManager()
 
     def __str__(self):
         return '{}-{}'.format(self.miner.public_key, self.share)
@@ -166,6 +169,7 @@ class Balance(models.Model):
     status = models.CharField(blank=False, choices=STATUS_CHOICE, default="immature", max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = CopyManager()
 
     class Meta:
         indexes = [
@@ -188,6 +192,7 @@ class AggregateShare(models.Model):
     repetitious_num = models.PositiveIntegerField()
     difficulty_sum = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
+    objects = CopyManager()
 
 
 class ConfigurationManager(models.Manager):

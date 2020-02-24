@@ -2312,11 +2312,11 @@ class AggregateTestCase(TestCase):
         """
         date = '2020-01-27 12:19:46.196633'
         self.shares_detail_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
-                                               settings.SHARE_DETAIL_FOLDER, date) + '.json'
+                                               settings.SHARE_DETAIL_FOLDER, date) + '.csv'
         self.shares_aggregate_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
-                                                  settings.SHARE_AGGREGATE_FOLDER, date) + '.json'
+                                                  settings.SHARE_AGGREGATE_FOLDER, date) + '.csv'
         self.balance_detail_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
-                                                settings.BALANCE_DETAIL_FOLDER, date) + '.json'
+                                                settings.BALANCE_DETAIL_FOLDER, date) + '.csv'
 
         # deleting files
         for file in [self.shares_aggregate_file, self.shares_detail_file, self.balance_detail_file]:
@@ -2356,12 +2356,10 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        share_detail_content = []
 
-        for solved in self.solved[:-settings.KEEP_SHARES_WITH_DETAIL_NUM]:
-            for share in Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)):
-                share_detail_content.append(str(ShareSerializer(share).data))
-
+        share = self.solved[:-settings.KEEP_SHARES_WITH_DETAIL_NUM][-1]
+        shares = Share.objects.filter(status__in=['valid', 'invalid', 'repetitious'], created_at__lte=share.created_at)
+        share_detail_content = shares.to_csv().decode('utf-8')
         aggregate()
 
         # all shares in last 5 rounds must remain with details
@@ -2394,19 +2392,16 @@ class AggregateTestCase(TestCase):
             self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
             self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
 
-        share_detail_content = '\n'.join(sorted(share_detail_content))
-
         self.assertTrue(os.path.exists(self.shares_detail_file))
         with open(self.shares_detail_file, 'r') as file:
-            content = file.read().rstrip()
-            content = '\n'.join(sorted(content.split('\n')))
+            content = file.read()
             self.assertEqual(share_detail_content, content)
 
         self.assertTrue(os.path.exists(self.shares_aggregate_file))
         with open(self.shares_aggregate_file, 'r') as file:
             content = file.read().rstrip()
             content = content.split('\n')
-            self.assertEqual(len(content), 10)
+            self.assertEqual(len(content), 11)
 
     def test_share_6_with_detail_other_aggregated(self, mocked_time):
         """
@@ -2414,11 +2409,9 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        share_aggregate_content = []
-        share_detail_content = []
 
-        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
-            share_detail_content.append(str(ShareSerializer(share).data))
+        shares = Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1))
+        share_detail_content = shares.to_csv().decode('utf-8')
 
         for solved in self.solved[:4]:
             solved.is_aggregated = True
@@ -2431,10 +2424,8 @@ class AggregateTestCase(TestCase):
                 else:
                     AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
                                                   invalid_num=1, repetitious_num=1, difficulty_sum=30)
-
-        for solved in self.solved[:2]:
-            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
-                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
+        share_aggregate_content = AggregateShare.objects.filter(solved_share__in=self.solved[:2]).\
+            to_csv().decode('utf-8')
 
         aggregate()
 
@@ -2459,15 +2450,11 @@ class AggregateTestCase(TestCase):
             self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
             self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
 
-        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
-        share_detail_content = '\n'.join(sorted(share_detail_content))
-
         for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
                                            (self.shares_detail_file, share_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
+                content = file.read()
                 self.assertEqual(expected_content, content)
 
     def test_share_6_with_detail_other_aggregated_some_miners_not_exist_in_round(self, mocked_time):
@@ -2477,15 +2464,12 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        share_aggregate_content = []
-        share_detail_content = []
-
         # first miner is not present in 5th round, so nothing must be aggregated for him
         Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1),
                              miner=Miner.objects.all()[0]).delete()
 
-        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
-            share_detail_content.append(str(ShareSerializer(share).data))
+        share_detail_content = Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)).\
+            to_csv().decode('utf-8')
 
         for solved in self.solved[:4]:
             solved.is_aggregated = True
@@ -2499,9 +2483,8 @@ class AggregateTestCase(TestCase):
                     AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
                                                   invalid_num=1, repetitious_num=1, difficulty_sum=30)
 
-        for solved in self.solved[:2]:
-            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
-                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
+        share_aggregate_content = AggregateShare.objects.filter(solved_share__in=self.solved[:2]). \
+            to_csv().decode('utf-8')
 
         aggregate()
 
@@ -2532,82 +2515,11 @@ class AggregateTestCase(TestCase):
             self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
             self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
 
-        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
-        share_detail_content = '\n'.join(sorted(share_detail_content))
-
         for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
                                            (self.shares_detail_file, share_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
-
-    def test_share_6_with_detail_other_aggregated_files_not_empty(self, mocked_time):
-        """
-        some aggregated must be removed, some details must be aggregated
-        balance, shares_detail and shares_aggregate files are not empty, must be appended
-        """
-        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                         '%Y-%m-%d %H:%M:%S.%f')
-        share_aggregate_content = ['just', 'something', 'random']
-        share_detail_content = ['just', 'something', 'random']
-
-        for file in [self.shares_aggregate_file, self.shares_detail_file]:
-            with open(file, 'w') as cur:
-                cur.write('just\nsomething\nrandom\n')
-
-        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
-            share_detail_content.append(str(ShareSerializer(share).data))
-
-        for solved in self.solved[:4]:
-            solved.is_aggregated = True
-            solved.save()
-            Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).delete()
-            for miner in Miner.objects.all():
-                if miner.public_key in ['0', '1', '2']:
-                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=2,
-                                                  invalid_num=2, repetitious_num=2, difficulty_sum=60)
-                else:
-                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
-                                                  invalid_num=1, repetitious_num=1, difficulty_sum=30)
-
-        for solved in self.solved[:2]:
-            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
-                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
-
-        aggregate()
-
-        # all shares in last 5 rounds must remain with details
-        for solved in self.solved[-5:]:
-            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, False)
-            # the solved share must remain
-            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
-            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 24)
-            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
-
-        # 5th round must remain aggregated
-        for solved in self.solved[2:5]:
-            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, True)
-            for miner in Miner.objects.all():
-                self.assertEqual(AggregateShare.objects.filter(miner=miner, solved_share=solved).count(), 1)
-
-        # 2 aggregated rounds must be removed
-        for solved in self.solved[:2]:
-            # the solved share must remain
-            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
-            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
-            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
-
-        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
-        share_detail_content = '\n'.join(sorted(share_detail_content))
-
-        self.assertTrue(os.path.exists(self.shares_aggregate_file))
-        for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
-                                           (self.shares_detail_file, share_detail_content)]:
-            with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
+                content = file.read()
                 self.assertEqual(expected_content, content)
 
     def test_share_5_detail_3_aggregated(self, mocked_time):
@@ -2659,10 +2571,9 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        balance_detail_content = []
-
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
+        balances = Balance.objects.filter(created_at__lte=self.solved[1].created_at)
+        balance_detail_content = balances.to_csv()
+        balance_detail_content = balance_detail_content.decode('utf-8')
 
         aggregate()
 
@@ -2677,51 +2588,10 @@ class AggregateTestCase(TestCase):
                 self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status='withdraw',
                                                         balance=int(-10e9)).count(), 1)
 
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r')as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
-
-    def test_balance_all_with_detail_file_not_empty(self, mocked_time):
-        """
-        all balances are with details
-        balance detail file is already present with some values
-        should be appended to the end of the file
-        """
-        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                         '%Y-%m-%d %H:%M:%S.%f')
-        balance_detail_content = ['just', 'something', 'random']
-
-        with open(self.balance_detail_file, 'w') as file:
-            file.write('just\nsomething\nrandom\n')
-
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
-
-        aggregate()
-
-        for miner in Miner.objects.all():
-            self.assertEqual(Balance.objects.filter(miner=miner, status="mature", balance=int(60e9)).count(), 1)
-            self.assertEqual(Balance.objects.filter(miner=miner, status="withdraw", balance=int(-20e9)).count(), 1)
-
-        for solved in self.solved[2:]:
-            for miner in Miner.objects.all():
-                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="mature",
-                                                        balance=int(30e9)).count(), 1)
-                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="withdraw",
-                                                        balance=int(-10e9)).count(), 1)
-
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
-        for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
-            self.assertTrue(os.path.exists(filename))
-            with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
+                content = file.read()
                 self.assertEqual(expected_content, content)
 
     def test_balance_all_with_detail_some_without_share(self, mocked_time):
@@ -2731,15 +2601,14 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        balance_detail_content = []
 
         b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(100e9), status="mature")
         Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
         b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(-50e9), status="withdraw")
         Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
 
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
+        balance_detail_content = Balance.objects.filter(created_at__lte=self.solved[1].created_at).\
+            to_csv().decode('utf-8')
 
         aggregate()
 
@@ -2759,13 +2628,10 @@ class AggregateTestCase(TestCase):
                 self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="withdraw",
                                                         balance=int(-10e9)).count(), 1)
 
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
+                content = file.read()
                 self.assertEqual(expected_content, content)
 
     @override_settings(KEEP_BALANCE_WITH_DETAIL_NUM=0)
@@ -2778,8 +2644,7 @@ class AggregateTestCase(TestCase):
         balance_detail_content = []
         settings.KEEP_BALANCE_WITH_DETAIL_NUM = 0
 
-        for balance in Balance.objects.all():
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
+        balance_detail_content = Balance.objects.all().to_csv().decode('utf-8')
 
         aggregate()
 
@@ -2794,13 +2659,10 @@ class AggregateTestCase(TestCase):
                 self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="withdraw",
                                                         balance=int(-10e9)).count(), 0)
 
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
+                content = file.read()
                 self.assertEqual(expected_content, content)
 
     def test_balance_all_with_detail_with_immature_and_pending(self, mocked_time):
@@ -2821,10 +2683,8 @@ class AggregateTestCase(TestCase):
         b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(-50e9), status="pending_withdrawal")
         Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
 
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at,
-                                              status__in=["mature", "withdraw"]):
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
-
+        balance_detail_content = Balance.objects.filter(created_at__lte=self.solved[1].created_at,
+                                              status__in=["mature", "withdraw"]).to_csv().decode('utf-8')
         aggregate()
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
@@ -2841,13 +2701,10 @@ class AggregateTestCase(TestCase):
                 self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="withdraw",
                                                         balance=int(-10e9)).count(), 1)
 
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
+                content = file.read()
                 self.assertEqual(expected_content, content)
 
     def tearDown(self):
