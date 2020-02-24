@@ -242,7 +242,8 @@ def node_request(api, header=None, data=None, params=None, request_type="get"):
         # check status code 2XX range is success
         return {
             "response": response_json,
-            "status": "success" if 200 <= response.status_code <= 299 else "External Error"
+            "status": "success" if 200 <= response.status_code <= 299 else
+            ("not-found" if response.status_code == 404 else "External Error")
         }
     except requests.exceptions.RequestException as e:
         logger.error("Can not resolve response from node")

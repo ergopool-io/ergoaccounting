@@ -424,3 +424,39 @@ def get_ergo_price():
     except Exception as ex:
         print(ex)
         logger.error('problem getting ergo price!')
+
+
+@app.task
+def periodic_verify_blocks():
+    """
+    A periodic task for check transaction of share if transaction is valid,
+     flag transaction_valid set True else set False.
+    :return:
+    """
+    logger.info('running verify blocks task.')
+    data_node = node_request('info')
+    if data_node['status'] != 'success':
+        logger.critical('can not get info from node! exiting.')
+        return
+    height = data_node['response']['fullHeight'] - 3
+
+    # Get blocks solved lower than height with flag transaction_valid None
+    shares = Share.objects.filter(
+        Q(block_height__lte=height),
+        Q(status='solved'),
+        Q(transaction_valid=None)
+    )
+    # Check should be there is transaction_id in the wallet and at the same height
+    for share in shares:
+        data_node = node_request('wallet/transactionById', params={'id': share.transaction_id})
+        if data_node['status'] == 'success':
+            if data_node['response'][0]['inclusionHeight'] == share.block_height:
+                share.transaction_valid = True
+            else:
+                share.transaction_valid = False
+        elif data_node['status'] == 'not-found':
+            share.transaction_valid = False
+        else:
+            logger.debug("response of node api 'wallet/transactionById' {}".format(data_node['response']))
+    Share.objects.bulk_update(shares, ['transaction_valid'])
+    return
