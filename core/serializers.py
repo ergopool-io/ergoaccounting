@@ -106,6 +106,7 @@ class ConfigurationSerializer(serializers.ModelSerializer):
     def save(self, **kwargs):
         pass
 
+
 class MinerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Miner
@@ -122,5 +123,3 @@ class MinerSerializer(serializers.ModelSerializer):
                                               .format(MIN_THRESHOLD, MAX_THRESHOLD))
 
         return value
-
-
