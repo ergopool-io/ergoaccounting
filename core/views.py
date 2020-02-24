@@ -167,9 +167,11 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
 
 class UserApiViewSet(viewsets.GenericViewSet,
                      mixins.ListModelMixin,
+                     mixins.UpdateModelMixin,
                      mixins.RetrieveModelMixin):
     model = Miner
     queryset = Miner.objects.all()
+    serializer_class = MinerSerializer
 
     def get_object(self):
         """
@@ -178,7 +180,48 @@ class UserApiViewSet(viewsets.GenericViewSet,
         """
         pk = self.kwargs.get('pk')
         miner = Miner.objects.filter(Q(public_key=pk.lower()) | Q(address__address=pk)).distinct()
-        return miner
+        return miner.first()
+
+    @action(detail=True, methods=['post'], name='withdrawal')
+    def withdraw(self, request, pk=None):
+        """
+        this action specifies withdraw action of the miner.
+        runs a celery task in case that the request is valid
+        """
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        miner = self.get_object()
+        # balances with "mature", "withdraw" and "pending_withdrawal" status
+        total = Balance.objects.filter(miner=miner, status__in=['mature', 'withdraw', 'pending_withdrawal']).aggregate(
+            Sum('balance')).get('balance__sum')
+
+        if total is None:
+            total = 0
+
+        requested_amount = request.data.get('withdraw_amount')
+
+        try:
+            requested_amount = int(requested_amount)
+            if requested_amount <= 0:
+                raise Exception()
+
+        except:
+            return Response({'message': 'withdraw_amount field is not valid.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if requested_amount < TRANSACTION_FEE:
+            return Response(
+                {'message': 'withdraw_amount must be bigger than transaction fee: {}.'.format(TRANSACTION_FEE)},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        if requested_amount > total:
+            return Response({'message': 'withdraw_amount is bigger than total balance.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # creating a pending_withdrawal status
+        balance = Balance.objects.create(miner=miner, balance=-requested_amount, status="pending_withdrawal")
+        generate_and_send_transaction.delay([(miner.public_key, requested_amount, balance.pk)],
+                                            subtract_fee=True)
+        return Response({'message': 'withdrawal was successful.',
+                         'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
 
     def get_balance(self):
         """
@@ -191,7 +234,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         self.ordering = 'date'
 
         # Get object detail method call
-        miner = self.get_object().first()
+        miner = self.get_object()
         query = self.request.query_params
         # Set timezone
         tz = get_current_timezone()
@@ -237,7 +280,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         """
         return last 1000 income of user as list
         """
-        miner = self.get_object().first()
+        miner = self.get_object()
         share = Share.objects.filter(status='solved').filter(
             Q(miner=miner) &
             Q(balance__status='immature') |
@@ -263,7 +306,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         """
         Returns Average and current hash_rate
         """
-        miner = self.get_object().first()
+        miner = self.get_object()
         # Get query_params
         query = self.request.query_params
         # Set start period for get data from data_base if there is not start param set time now mines
@@ -321,7 +364,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         """
         return valid and invalid shares of a miner between 2 time stamp
         """
-        miner = self.get_object().first()
+        miner = self.get_object()
         # Get query_params
         query = self.request.query_params
         # Set start period for get data from data_base if there is not start param set time now mines
@@ -512,50 +555,6 @@ class BlockView(viewsets.GenericViewSet,
         if page is not None:
             return self.get_paginated_response(page)
         return Response(queryset[:])
-
-
-class MinerView(viewsets.GenericViewSet, mixins.UpdateModelMixin):
-    model = Miner
-    serializer_class = MinerSerializer
-    queryset = Miner.objects.all()
-    lookup_field = 'public_key'
-
-    @action(detail=True, methods=['post'], name='withdrawal')
-    def withdraw(self, request, public_key=None):
-        """
-        this action specifies withdraw action of the miner.
-        runs a celery task in case that the request is valid
-        """
-        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
-        miner = self.get_object()
-        # balances with "mature", "withdraw" and "pending_withdrawal" status
-        total = Balance.objects.filter(miner=miner, status__in=['mature', 'withdraw', 'pending_withdrawal']).aggregate(
-            Sum('balance')).get('balance__sum')
-
-        requested_amount = request.data.get('withdraw_amount')
-        try:
-            requested_amount = int(requested_amount)
-            if requested_amount <= 0:
-                raise Exception()
-
-        except:
-            return Response({'message': 'withdraw_amount field is not valid.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if requested_amount < TRANSACTION_FEE:
-            return Response(
-                {'message': 'withdraw_amount must be bigger than transaction fee: {}.'.format(TRANSACTION_FEE)},
-                status=status.HTTP_400_BAD_REQUEST)
-
-        if requested_amount > total:
-            return Response({'message': 'withdraw_amount is bigger than total balance.'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        # creating a pending_withdrawal status
-        balance = Balance.objects.create(miner=miner, balance=-requested_amount, status="pending_withdrawal")
-        generate_and_send_transaction.delay([(miner.public_key, requested_amount, balance.pk)],
-                                            subtract_fee=True)
-        return Response({'message': 'withdrawal was successful.',
-                         'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
 
 
 class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
