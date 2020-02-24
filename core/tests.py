@@ -1482,8 +1482,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([(miner.public_key, int(80e9), max_id + 1)])])
 
-        self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(),
-                         1)
+        self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-80e9),
+                                                status="pending_withdrawal").count(), 1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
 
     def test_all_miner_below_default_threshold_two_explicit_threshold(self, mocked_generate_txs):
@@ -1499,8 +1499,9 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner2.save()
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
         periodic_withdrawal()
-        mocked_generate_txs.assert_has_calls([call(sorted([(miner1.public_key, int(80e9), max_id + 1),
-                                                           (miner2.public_key, int(80e9), max_id + 2)]))])
+        pks = sorted([m.public_key for m in [miner1, miner2]])
+        outputs = [(pk, int(80e9), max_id + 1 + i) for i, pk in enumerate(pks)]
+        mocked_generate_txs.assert_has_calls([call(outputs)])
         for miner in [miner1, miner2]:
             self.assertEqual(
                 Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(), 1)
