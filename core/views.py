@@ -606,27 +606,17 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
             )))
         # Number of miner in table Miner
         count_miner = Miner.objects.count()
+
         # Get blocks solved in past hour
-        shares = Share.objects.filter(
+        solution_count = Share.objects.filter(
             Q(created_at__gte=(timezone.now() - timedelta(seconds=TOTAL_PERIOD_COUNT_SHARE))) &
-            Q(status='solved')
-        ).values('transaction_id')
-        # Check should be there is transaction_id in the wallet
-        count = 0
-        for share in shares:
-            data_node = node_request('wallet/transactionById?id={}'.format(share['transaction_id']),
-                                     {
-                                         'accept': 'application/json',
-                                         'content-type': 'application/json',
-                                         'api_key': API_KEY
-                                     })
-            if data_node['status'] == 'success':
-                count += 1
-            else:
-                logger.debug("response of node api 'wallet/transactionById' {}".format(data_node['response']))
+            Q(status='solved') &
+            Q(transaction_valid=True)
+        ).distinct().count()
+
         # Active Miner in past hour
         active_miners_count = Miner.objects.filter(
-            minerip__updated_at__range=(timezone.now() - timedelta(seconds=PERIOD_ACTIVE_MINERS_COUNT), timezone.now())
+            minerip__updated_at__gte=(timezone.now() - timedelta(seconds=PERIOD_ACTIVE_MINERS_COUNT))
         ).distinct().count()
         # Set value of response
 
@@ -646,7 +636,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 'btc': price_btc,
                 'usd': price_usd
             },
-            "blocks_in_hour": count / (TOTAL_PERIOD_COUNT_SHARE/3600)
+            "blocks_in_hour": solution_count / (TOTAL_PERIOD_COUNT_SHARE/3600)
         }
 
         return Response(response)

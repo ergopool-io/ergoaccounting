@@ -20,7 +20,8 @@ from django.conf import settings
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
     CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
-from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction, get_ergo_price
+from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction,\
+    get_ergo_price, periodic_verify_blocks
 from core.utils import RewardAlgorithm, get_miner_payment_address
 
 
@@ -2957,3 +2958,84 @@ class GetMinerAddressTestCase(TestCase):
 
     def tearDown(self):
         ExtraInfo.objects.all().delete()
+
+
+class PeriodicVerifyBlocks(TestCase):
+    """
+    For test task periodic verify blocks
+    """
+    CURRENT_HEIGHT = 11
+
+    def mocked_node_request(*args, **kwargs):
+        """
+        mock requests with method post
+        """
+        url = args[0]
+
+        if url == 'info':
+            return {
+                'response': {'fullHeight': PeriodicVerifyBlocks.CURRENT_HEIGHT},
+                'status': 'success'
+            }
+
+        if 'wallet/transactionById' in url:
+            params = kwargs['params']['id']
+            if params == '6':
+                return {
+                    'response': ['Error'],
+                    'status': 'External Error'
+                }
+            if params == '7':
+                return {
+                    'status': 'not-found'
+                }
+            if params == '8':
+                return {
+                    'response': [{'inclusionHeight': int(params) + 1}],
+                    'status': 'success'
+                }
+            return {
+                'response': [{'inclusionHeight': int(params)}],
+                'status': 'success'
+            }
+
+        return {
+            'response': None,
+            'status': 'error'
+        }
+
+    def setUp(self):
+        """
+        Create 1 miner and 10 shares with specific transaction_id and block_height
+        :return:
+        """
+        miner = Miner.objects.create(public_key='1')
+        for x in range(10):
+            Share.objects.create(miner=miner, transaction_id=str(x), difficulty=1, block_height=str(x),
+                                 status='solved', parent_id='1')
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    def test_verify_blocks(self, mock_node):
+        """
+        run task verify blocks and check flag transaction_valid expect transaction_valid for shares with
+        transaction_id 8, 7 is False because height not true and not-found transaction in block-chain,
+         transaction_id 6 flag is None because node don't send response for this share,
+          transaction_id 9 is None because not in range check transaction.
+        :return:
+        """
+        periodic_verify_blocks()
+        shares = Share.objects.all().order_by('transaction_id')
+        self.assertIsNone(shares[9].transaction_valid)
+        self.assertFalse(shares[8].transaction_valid)
+        self.assertFalse(shares[7].transaction_valid)
+        self.assertIsNone(shares[6].transaction_valid)
+        for x in range(5, -1, -1):
+            self.assertTrue(shares[x].transaction_valid)
+
+    def tearDown(self):
+        """
+        tearDown function to clean up objects created in setUp function
+        :return:
+        """
+        Miner.objects.all().delete()
+        Share.objects.all().delete()
