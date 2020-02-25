@@ -487,12 +487,17 @@ class UserApiViewSet(viewsets.GenericViewSet,
         ) if user_pk else Miner.objects
 
         # Shares of this round and balances of user
+        total_balance = Miner.objects.filter(pk__in=miners.values('pk')).values('public_key').annotate(
+            immature=Sum('balance__balance', filter=Q(balance__status="immature")),
+            mature=Sum('balance__balance', filter=Q(balance__status="mature")),
+            withdraw=Sum('balance__balance', filter=Q(balance__status="withdraw")),
+        ).order_by('public_key')
+
         round_shares = Miner.objects.filter(pk__in=miners.values('pk')).values('public_key').annotate(
-            valid_shares=Count('id', filter=Q(share__created_at__gt=round_start_time, share__status="valid")),
-            invalid_shares=Count('id', filter=Q(share__created_at__gt=round_start_time, share__status="invalid")),
-            immature=Sum('share__balance__balance', filter=Q(share__balance__status="immature")),
-            mature=Sum('share__balance__balance', filter=Q(share__balance__status="mature")),
-            withdraw=Sum('share__balance__balance', filter=Q(share__balance__status="withdraw")),
+            valid_shares=Count('share__id', filter=Q(share__created_at__gt=round_start_time,
+                                                     share__status__in=["solved", "valid"]), distinct=True),
+            invalid_shares=Count('share__id', filter=Q(share__created_at__gt=round_start_time,
+                                                       share__status__in=["repetitious", "invalid"]), distinct=True),
             sum_period_diagram_difficulty=Sum('share__difficulty', filter=Q(
                 share__status__in=['valid', 'solved']
             ) & Q(
@@ -503,10 +508,21 @@ class UserApiViewSet(viewsets.GenericViewSet,
             ) & Q(
                 share__created_at__gte=(timezone.now() - timedelta(seconds=TOTAL_PERIOD_HASH_RATE))
             ))
-        )
+        ).order_by('public_key')
+
         round_share = round_shares.first() or {}
         logger.info('Get user params for miner: {}'.format(round_share.get('public_key') if user_pk else None))
         response = {}
+        temp = {}
+        for balance in total_balance:
+            public_key = balance.pop('public_key')
+            temp[public_key] = balance
+
+        for share in round_shares:
+            public_key = share.pop('public_key')
+            if public_key not in temp.keys():
+                temp[public_key] = {}
+            temp[public_key].update(share)
 
         def convert_row(row_dict):
             return {
@@ -521,10 +537,10 @@ class UserApiViewSet(viewsets.GenericViewSet,
                 }
             }
         if user_pk:
-            response[user_pk] = convert_row(round_shares[0] if len(round_shares) > 0 else {})
+            response[user_pk] = convert_row(temp[list(temp.keys())[0]] if len(round_shares) > 0 else {})
         else:
-            for item in round_shares:
-                response[item.get("public_key")] = convert_row(item)
+            for item in temp:
+                response[item] = convert_row(temp[item])
         return response
 
 
