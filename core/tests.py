@@ -556,6 +556,7 @@ class UserApiTestCase(TestCase):
         for miner in Miner.objects.all():
             Balance.objects.create(miner=miner, balance=int(100e9), status="mature")
             Balance.objects.create(miner=miner, balance=int(-20e9), status="withdraw")
+
         self.balances = list(Balance.objects.all())
 
         self.factory = RequestFactory()
@@ -590,12 +591,12 @@ class UserApiTestCase(TestCase):
         ]
 
         # Create balances
-        Balance.objects.create(miner=cur_miners[0], share=shares[0], balance=100, status="immature"),
-        Balance.objects.create(miner=cur_miners[0], share=shares[1], balance=200, status="immature"),
-        Balance.objects.create(miner=cur_miners[0], share=shares[2], balance=300, status="mature"),
-        Balance.objects.create(miner=cur_miners[0], share=shares[3], balance=400, status="withdraw"),
-        Balance.objects.create(miner=cur_miners[1], share=shares[4], balance=500, status="mature"),
-        Balance.objects.create(miner=cur_miners[1], share=shares[5], balance=600, status="mature"),
+        Balance.objects.create(miner=cur_miners[0], share=shares[0], balance=100, status="immature")
+        Balance.objects.create(miner=cur_miners[0], share=shares[1], balance=200, status="immature")
+        Balance.objects.create(miner=cur_miners[0], share=shares[2], balance=300, status="mature")
+        Balance.objects.create(miner=cur_miners[0], balance=-400, status="withdraw")
+        Balance.objects.create(miner=cur_miners[1], share=shares[4], balance=500, status="mature")
+        Balance.objects.create(miner=cur_miners[1], share=shares[5], balance=600, status="mature")
 
     def get_threshold_url(self, pk):
         return urljoin('/user/', pk) + '/'
