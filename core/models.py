@@ -139,6 +139,7 @@ class Share(models.Model):
     parent_id = models.CharField(max_length=80, null=False, blank=False, default="0")
     next_ids = ArrayField(models.CharField(max_length=80, blank=True, null=True), blank=True, null=True, default=list)
     path = models.CharField(max_length=100, blank=True, null=True)
+    pow_identity = models.CharField(max_length=200, blank=True, null=True)
     is_aggregated = models.BooleanField(default=False)
     miner_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='miner_addresses')
     lock_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='lock_addresses')

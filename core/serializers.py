@@ -35,11 +35,14 @@ class ShareSerializer(serializers.ModelSerializer):
         :return:
         """
         if attrs.get("status") == 'solved':
+            if not attrs.get("pow_identity"):
+                logger.error('pow_identity field must be present for solved shares.')
+                raise serializers.ValidationError("pow_identity field must be present for solved shares.")
             if not attrs.get("transaction_id"):
-                logger.debug('Transaction id is not provided for solved share.')
+                logger.error('Transaction id is not provided for solved share.')
                 raise serializers.ValidationError("transaction id is required when solved solution received")
             if not attrs.get("block_height"):
-                logger.debug('Block height is not provided for solved share.')
+                logger.error('Block height is not provided for solved share.')
                 raise serializers.ValidationError("block height is required when solved solution received")
         else:
             if 'transaction_id' in attrs:
@@ -50,10 +53,10 @@ class ShareSerializer(serializers.ModelSerializer):
         # in status of solved or valid parent_id and next parameters is required
         if attrs.get("status") == 'solved' or attrs.get("status") == 'valid':
             if not attrs.get("parent_id"):
-                logger.debug('parent id is not provided for solved share.')
+                logger.error('parent id is not provided for solved share.')
                 raise serializers.ValidationError("parent id is required when solved or valid solution received")
             if not attrs.get("path"):
-                logger.debug('path is not provided for solved or valid share.')
+                logger.error('path is not provided for solved or valid share.')
                 raise serializers.ValidationError("path is required when solved or valid solution received")
         else:
             if 'parent_id' in attrs:
@@ -67,8 +70,8 @@ class ShareSerializer(serializers.ModelSerializer):
         model = Share
         fields = ['share', 'miner', 'status', 'transaction_id', 'block_height', 'difficulty',
                   'created_at', 'miner_address', 'lock_address', 'withdraw_address', 'parent_id',
-                  'next_ids', 'path', 'client_ip']
-        write_only_fields = ['transaction_id', 'block_height', 'parent_id', 'next_ids', 'path', 'client_ip']
+                  'next_ids', 'path', 'client_ip', 'pow_identity']
+        write_only_fields = ['transaction_id', 'block_height', 'parent_id', 'next_ids', 'path', 'client_ip', 'pow_identity']
 
 
 class BalanceSerializer(serializers.ModelSerializer):
