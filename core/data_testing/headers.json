@@ -15,9 +15,9 @@
     "extensionHash": "a46487973c5ac19a5afd8bb5c782b092e963db7fc5faed437bd0fd4b13030b5d",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "02490e1ae5da2976108b3cca9b831c7503bf765a336b2a5e5981965d15dede9808",
-      "n": "00000115e40dd386",
-      "d": 3.425280907111895e+66
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "b69d38025d85e337393be136f50ea4ad10f4a00965e6a1e3348ab00e17a204a9",
     "transactionsId": "056f5e4e6ed0427fc3f11409e91d497af4a19026758f6a8ce99950d6b00407b1",
@@ -39,9 +39,9 @@
     "extensionHash": "22959514f5ef5f7da293bad179b30d625e179b4d1e9f453e048debf39ae1468f",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "028ec06b4bbda384ce596460384d26a47d58346bc8933c424435a90ff0947db288",
-      "n": "00000788815b9d8f",
-      "d": 1.2750505823520721e+67
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "a98ce5d12294a3e698a9b9bbd602cf6504eceeaf58cabe6911a742ae3e939452",
     "transactionsId": "69e1189089c91726eed2f12e239000b64fb1200ea988e825bc0e93578f38242c",
@@ -63,9 +63,9 @@
     "extensionHash": "22959514f5ef5f7da293bad179b30d625e179b4d1e9f453e048debf39ae1468f",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "0240c6eefa8a0cfdfb047e271a04e64e65061d2f1a965a9e43df5b4875eb276fc8",
-      "n": "000001167ada1f2e",
-      "d": 1.9957127593397437e+66
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "7505b9e366a1722b7551f04ad69f9d1fa97d1c21646af86bb464ebfa4304717d",
     "transactionsId": "edf4533825daac702bad475458291ed03e8c0f02cdce256af86e10a1d378cc92",
@@ -87,9 +87,9 @@
     "extensionHash": "ca024352a09a18764a5d3577c0510602fe5073b907c0a2122753d8377f089304",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "025a41bda8594256a25d118fe5f930ce9672c116a91eadfc085e1fc13db88710d5",
-      "n": "0000011718b76ce3",
-      "d": 1.8725759735476034e+67
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "cc0c5423c75a741e824c040d4a709304e5c04a2ab9b489f9bff41739e96818d0",
     "transactionsId": "a75ee5435d06b5f069c8bac35fb37eca00f3d93dfd8578813ec5b28879dd9930",
@@ -111,9 +111,9 @@
     "extensionHash": "ca024352a09a18764a5d3577c0510602fe5073b907c0a2122753d8377f089304",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "02d3c9f1ca4fe2cf50ac4866169113e7de2a6a154a1b92389a04b95dc0692bc4b9",
-      "n": "0000078961921fbd",
-      "d": 1.8619295312952858e+67
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "9e35f34c0b869c01d5905bd065bff4e200177c31af76357a1c24c430bfcb16c0",
     "transactionsId": "353cad5e631f2f3682e0c9db8bfa4bb9b83a679997d6e4d180030d7c3fe212ee",
@@ -135,9 +135,9 @@
     "extensionHash": "ca024352a09a18764a5d3577c0510602fe5073b907c0a2122753d8377f089304",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "03e8f0dd9a645a57bcf9327a7a6a687e5760b20a733c52185d133f50b77f176518",
-      "n": "00000789b6de65d0",
-      "d": 7.295687016049363e+66
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "8d5b3414678762e246100dead8a0a4e827cea98edb2266b2855ecf2ff332b329",
     "transactionsId": "e58561931d113d7b1339106bba9041dbdd1ddc45327670eb29b466cc0e496abe",
@@ -159,9 +159,9 @@
     "extensionHash": "c3f5f4362b2d230257ce13035d439d84680a4942ebc01b4a4451007ac4162986",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "039d66a6f25a4cbb5f414f8b8a303b769135722ab8a5e9d6f0eda5dd3710559033",
-      "n": "0000078b82e1f961",
-      "d": 1.8259870308442903e+67
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "86c6a4ae20133e78f145703744440910f5c731f94f5cede546968b5774105624",
     "transactionsId": "f901a7403d3025b2c40e6f3228e001df3fb293f39626e53850ec6594b8dad855",
@@ -183,9 +183,9 @@
     "extensionHash": "c3f5f4362b2d230257ce13035d439d84680a4942ebc01b4a4451007ac4162986",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "0353d63347645869c06fe8d42599d362b4c55fad3d7e8e85174913aa0b8e35f840",
-      "n": "0000011b0ab9005b",
-      "d": 2.068501369204239e+67
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "ee8b508fa30ff38b2543874c441fad8daf1009be703404eba484bf9df7bfde77",
     "transactionsId": "34ec32efebd49d334a6fc296edc848b46452e2168b19a2ef5cffff50bbd22860",
@@ -207,9 +207,9 @@
     "extensionHash": "c3f5f4362b2d230257ce13035d439d84680a4942ebc01b4a4451007ac4162986",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "021e8fa23b698d7f7c52c76730e5defff6cb6fab26505d14bf3121961cc3c7e875",
-      "n": "0000078c424a132a",
-      "d": 6.862031886539974e+66
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "76924597bad66c6bf00f710582a5dbc0d6fa76bee2059c3ca3f471252975f858",
     "transactionsId": "d2800776d68902d63af77d558800d0d829555086f7ef6ee4cab6bf537c9d7f38",
@@ -231,9 +231,9 @@
     "extensionHash": "0eb2629cc5cd77d1839f0b98b76984dbf91c10783bc67ac436d8ec86b11fc583",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "023f5f8cd48e2f598ee58b3219d7a94d6b23f63e2ff36550e24feaabf1a55ade80",
-      "n": "0000011c233e1b89",
-      "d": 4.299737439170384e+66
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "d4e64075cb25a4406e9af98d8225b30e6f77055fabba005db2f115a61849b732",
     "transactionsId": "31ba439f51ebf1f1e9526641c13e6a067f3edd3198bfed0e0f4fe556547bc510",
@@ -255,9 +255,9 @@
     "extensionHash": "91dc78f28b54b729a1ab1dbd0e2538e8429144ad4323ab3a2a1bd934ea5078d6",
     "powSolutions": {
       "pk": "0354efc32652cad6cf1231be987afa29a686af30b5735995e3ce51339c4d0ca380",
-      "w": "0336a1dd9b3f73fdef1269dde80ac02ddfcbe053581cb31dc79262e73248ab5b83",
-      "n": "0000078c72306ed0",
-      "d": 1.1412575598272672e+66
+      "w": "",
+      "n": "",
+      "d": 0
     },
     "adProofsId": "d3b610fab3beaaf073996a5e338744ec76ca1e5eba76c150284a76354cccb506",
     "transactionsId": "23e6d802d531131f12146ad4e308c1d95d0917c977ecf902d4b8e2764fe4f319",
