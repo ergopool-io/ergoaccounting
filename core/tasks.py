@@ -1,18 +1,18 @@
 import logging
 import os
 from datetime import datetime
+from hashlib import blake2b
 from pathlib import Path
 from urllib.parse import urljoin
 
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, Sum, Count, Max, Min
+from pycoingecko import CoinGeckoAPI
 
 from ErgoAccounting.celery import app
 from core.models import Miner, Balance, Configuration, Share, AggregateShare, ExtraInfo
-from core.serializers import BalanceSerializer, ShareSerializer, AggregateShareSerializer
 from core.utils import node_request, get_miner_payment_address, RewardAlgorithm
-from pycoingecko import CoinGeckoAPI
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +261,30 @@ def immature_to_mature():
             continue
 
         txt_res = txt_res['response']
+        tx_height = txt_res['inclusionHeight']
+
+        tx_height_ok = tx_height == share.block_height
+        tx_pow_ok = False
+        if tx_height_ok:
+            header = node_request('blocks/chainSlice',
+                                  params={'fromHeight': share.block_height, 'toHeight': share.block_height})
+            if header['status'] != 'success' or len(header['response']) == 0:
+                logger.error("could not verify solved share at {} because could not get header from node,"
+                             "skipping this share for now".format(share.block_height))
+                continue
+
+            header = header['response'][0]
+            pow = header['powSolutions']
+            to_hash = pow['w'] + pow['n'] + str(pow['d'])
+            pow_identity = blake2b(to_hash.encode('utf-8'), digest_size=32).hexdigest()
+            tx_pow_ok = pow_identity == share.pow_identity
+
+        if not tx_pow_ok or not tx_height_ok:
+            logger.debug('Solved share was not verified because either height or pow dont match, share height: {}, {}'
+                         .format(share.block_height, tx_height))
+            make_share_orphaned(share)
+            continue
+
         num_confirmations = txt_res['numConfirmations']
 
         if num_confirmations >= CONFIRMATION_LENGTH:
