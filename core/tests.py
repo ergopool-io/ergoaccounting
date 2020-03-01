@@ -946,6 +946,9 @@ class ConfigurationAPITest(TestCase):
         setUp function for 'ConfigurationAPITest' class do nothing
         :return:
         """
+        User.objects.create_user(username='test', password='test')
+        self.client = APIClient()
+        self.client.login(username='test', password='test')
         pass
 
     def test_configuration_api_get_method_list(self):

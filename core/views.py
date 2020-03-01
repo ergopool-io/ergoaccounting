@@ -1,27 +1,29 @@
 import logging
 from datetime import datetime, timedelta
-from urllib.parse import urljoin
 from pydoc import locate
-from django.utils.timezone import get_current_timezone
-import requests
+from urllib.parse import urljoin
 
+import requests
 from django.conf import settings
 from django.db.models import Q, Count, Sum, Max, Min
 from django.utils import timezone
+from django.utils.timezone import get_current_timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
 from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
-    LIMIT_NUMBER_CHUNK_DIAGRAM, API_KEY, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT,\
+    LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT, \
     TOTAL_PERIOD_COUNT_SHARE
+from core.authentication import CustomPermission
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, EXTRA_INFO_KEY_TYPE
+    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from core.tasks import generate_and_send_transaction
-from core.utils import RewardAlgorithm, BlockDataIterable, node_request
+from core.utils import RewardAlgorithm, BlockDataIterable
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,8 @@ class CustomPaginationLimitOffset(LimitOffsetPagination):
 
 class ShareView(viewsets.GenericViewSet,
                 mixins.CreateModelMixin):
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [CustomPermission]
     queryset = Share.objects.all()
     serializer_class = ShareSerializer
 
@@ -95,7 +99,7 @@ class ShareView(viewsets.GenericViewSet,
 class BalanceView(viewsets.GenericViewSet,
                   mixins.CreateModelMixin,
                   mixins.UpdateModelMixin,
-                  mixins.ListModelMixin, ):
+                  mixins.ListModelMixin):
     queryset = Balance.objects.all()
     serializer_class = BalanceSerializer
     pagination_class = CustomPagination
@@ -116,6 +120,8 @@ class BalanceView(viewsets.GenericViewSet,
 class ConfigurationViewSet(viewsets.GenericViewSet,
                            mixins.CreateModelMixin,
                            mixins.ListModelMixin):
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [CustomPermission]
     serializer_class = ConfigurationSerializer
     queryset = Configuration.objects.all()
     filter_backends = (filters.SearchFilter,)
