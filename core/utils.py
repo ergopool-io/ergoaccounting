@@ -34,9 +34,10 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         If the input share isn't 'solved', it will be invalid and the function do nothing.
         :return: nothing
         """
-        logger.info('running {} algorithm'.format(self.__class__.__name__))
+        logger.info('running {} reward algorithm for share {}.'.format(self.__class__.__name__, share.share))
 
         if not self.should_run_reward_algorithm(share):
+            logger.debug('quiting reward algorithm, should not run now!')
             return
 
         # finding the penultimate valid share
@@ -50,8 +51,6 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
 
         # share reward for these shares
         self.create_balance_from_share(shares, share)
-
-        return
 
     @abc.abstractmethod
     def get_beginning_share(self, considered_time):
@@ -128,11 +127,13 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
 
         # delete all related balances if it's not the first execution
         # of prop function (according to the input share)
-        # TODo
-        # Balance.objects.filter(share=share).delete()
         prev_balances = Balance.objects.filter(share=last_solved_share).values('miner').annotate(balance=Sum('balance'))
+        logger.info('prev balances len: {}.'.format(last_solved_share.share, prev_balances.count()))
         miner_to_prev_balances = {bal['miner']: bal['balance'] for bal in prev_balances}
         all_considered_miners = set(list(miner_to_prev_balances.keys()) + [x[0] for x in miners_share_count])
+
+        logger.info('miners related to this share: {}.'.format(len(all_considered_miners)))
+        logger.info('prev miners related to this share: {}.'.format(len(miner_to_prev_balances)))
 
         miner_to_contribution = {miner: contribution for (miner, contribution) in miners_share_count}
         with transaction.atomic():
@@ -147,6 +148,8 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
                 if miner_reward != miner_prev_reward:
                     # here we should either increase immature balances or create orphaned immature
                     # balance to decrease miner's reward
+                    logger.info('balance of miner {} changes to {}, prev one is {}.'.
+                                format(miner_id, miner_reward, miner_prev_reward))
                     balances.append(Balance(
                         miner_id=miner_id,
                         share=last_solved_share,
@@ -155,6 +158,7 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
                     )
 
             # create and save balances to database
+            logger.info('bulk creating balances {}.'.format(len(balances)))
             Balance.objects.bulk_create(balances)
             logger.info('Balance created for all miners related to this round.')
 
@@ -337,4 +341,5 @@ def get_miner_payment_address(miner):
     if address is not None:
         return address.address
 
+    logger.error('miner {} does not have an address for withdrawal.'.format(miner.public_key))
     return None
