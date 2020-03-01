@@ -25,7 +25,7 @@ def periodic_withdrawal():
     to withdraw the balance.
     :return:
     """
-
+    logger.info('running periodic withdrawal.')
     miners = Miner.objects.all()
 
     pk_to_miner = {
@@ -53,12 +53,13 @@ def periodic_withdrawal():
 
         balance = pk_to_total_balance.get(miner.public_key)
         if balance >= threshold:
+            logger.info('we will withdraw for miner {} value of {}.'.format(miner.public_key, balance))
             # above threshold (whether default one or the one specified by the miner)
             outputs.append((miner.public_key, balance))
 
-    # call the approprate function for withdrawal
+    # call the appropriate function for withdrawal
     try:
-        logger.info('Periodic withdrawal for #{} miners'.format(len(outputs)))
+        logger.info('we will withdraw for {} miners.'.format(len(outputs)))
         # Creating balance object with pending_withdrawal status
         outputs = sorted(outputs)
         objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance) for pk, balance in
@@ -67,8 +68,8 @@ def periodic_withdrawal():
         outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
         generate_and_send_transaction(outputs)
 
-    except:
-        logger.critical('Could not periodically withdraw due to exception, probably in node connection')
+    except Exception as e:
+        logger.critical('could not periodically withdraw due to exception, probably in node connection, {}.'.format(e))
 
 
 @app.task
@@ -86,7 +87,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
     :return: nothing
     :effect: creates balance for miners specified by each pk. must remove pending balances in any case
     """
-
+    logger.info('withdrawing for {} requests'.format(len(outputs)))
     pk_to_miner = {
         miner.public_key: miner for miner in Miner.objects.filter(public_key__in=[x[0] for x in outputs])
     }
@@ -97,6 +98,7 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
 
     # if output is empty
     if not outputs:
+        logger.debug('quiting sending txs, no request.')
         return
 
     pk_to_address = {
@@ -116,11 +118,12 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
     # getting all unspent boxes
     res = node_request('wallet/boxes/unspent')
     if res['status'] != 'success':
-        logger.critical('can not retrieve boxes from node')
+        logger.critical('can not retrieve boxes from node. quiting sending txs, {}.'.format(res))
         remove_pending_balances(outputs)
         return
 
     boxes = res['response']
+    logger.debug('boxes to use potentially for generating txs len: {}'.format(len(boxes)))
     # creating chunks of size MAX_NUMBER_OF_OUTPUT from outputs
 
     to_use_box_ind = 0
@@ -136,7 +139,8 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
             box = boxes[to_use_box_ind]
             res = node_request(urljoin('utxo/byIdBinary/', box['box']['boxId']))
             if res['status'] != 'success':
-                logger.critical('can not retrieve box info from node')
+                logger.critical('can not retrieve box info from node, box: {}, response: {}. quiting sending txs.'
+                                .format(box, res))
                 to_use_box_ind += 1
                 remove_pending_balances(outputs[chuck_start:])
                 return
@@ -144,11 +148,10 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
             byte = res['response']['bytes']
             to_use_boxes.append(byte)
             to_use_boxes_value_sum += box['box']['value']
-            logger.debug(box['box']['value'])
             to_use_box_ind += 1
 
         if to_use_boxes_value_sum < needed_erg:
-            logger.critical('Not enough boxes for withdrawal!')
+            logger.critical('not enough ergs for withdrawal! quiting.')
             remove_pending_balances(outputs[chuck_start:])
             return
 
@@ -171,9 +174,12 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
 
         if res['status'] != 'success':
             Balance.objects.filter(id__in=[balance.id for balance in balances]).delete()
-            logger.critical('can not create and send the transaction {}'.format(data))
+            logger.critical('can not create and send the transaction {}, response: {}'.format(data, res))
             remove_pending_balances(outputs[chuck_start + MAX_NUMBER_OF_OUTPUTS:])
             return
+
+        else:
+            logger.info('sent txs, response: {}.'.format(res))
 
 
 @app.task
@@ -211,7 +217,7 @@ def immature_to_mature():
     # getting current height
     res = node_request('info')
     if res['status'] != 'success':
-        logger.critical('can not get info from node! exiting.')
+        logger.critical('can not get info from node! quiting immature_to_mature.')
         return
 
     res = res['response']
@@ -243,6 +249,8 @@ def immature_to_mature():
 
     for share in all_considered_shares:
         if share.parent_id not in ids or len(ids.intersection(share.next_ids)) > 0:
+            logger.debug('we orphan share {} because either its parent is not on the chain or'
+                         'some of its parents child are present.'.format(share.share))
             # must be orphaned
             make_share_orphaned(share)
 
@@ -255,9 +263,10 @@ def immature_to_mature():
             res = txt_res['response']
             if 'error' in res and res['error'] == 404 and 'reason' in res and res['reason'] == 'not-found':
                 # transaction is not in the blockchain
+                logger.debug('tx {} is not present so we orphan share {}.'.format(share.transaction_id, share.share))
                 make_share_orphaned(share)
 
-            logger.error('can not get transaction info from node for id {}! exiting.'.format(share.transaction_id))
+            logger.error('we ignore share: {}.'.format(share.share))
             continue
 
         txt_res = txt_res['response']
@@ -280,7 +289,7 @@ def immature_to_mature():
             tx_pow_ok = pow_identity == share.pow_identity
 
         if not tx_pow_ok or not tx_height_ok:
-            logger.debug('Solved share was not verified because either height or pow dont match, share height: {}, {}'
+            logger.debug('solved share was not verified because either height or pow dont match, share height: {}, {}'
                          .format(share.block_height, tx_height))
             make_share_orphaned(share)
             continue
@@ -288,10 +297,16 @@ def immature_to_mature():
         num_confirmations = txt_res['numConfirmations']
 
         if num_confirmations >= CONFIRMATION_LENGTH:
+            logger.info('all ok for share {}, we run reward algorithm.'.format(share.share))
             RewardAlgorithm.get_instance().perform_logic(share)
             q |= Q(status="immature", share=share)
 
+        else:
+            logger.debug('share {} confirmation number is {}, we expect {}, ignoring this share for now.'.
+                         format(share.share, num_confirmations, CONFIRMATION_LENGTH))
+
     if len(q) > 0:
+        logger.info('maturing all balances related to ok solved shares, len: {}.'.format(len(q)))
         Balance.objects.filter(q).update(status="mature")
 
 
@@ -304,6 +319,7 @@ def aggregate():
     balances before some round specified in settings will be aggregated
     all deleted shares, balances and aggregated shares will be saved in their respective files
     """
+    logger.info('running aggregate task.')
     # create necessary folders if not exist
     for file in [settings.BALANCE_DETAIL_FOLDER, settings.SHARE_DETAIL_FOLDER, settings.SHARE_AGGREGATE_FOLDER]:
         Path(os.path.join(settings.AGGREGATE_ROOT_FOLDER, file)).mkdir(parents=True, exist_ok=True)
@@ -338,12 +354,15 @@ def aggregate():
         with transaction.atomic():
             to_delete_balances = Balance.objects.filter(created_at__lte=balance_solved_share.created_at,
                                                         status__in=["mature", "withdraw"])
+            logger.info('we are going to delete {} balances.'.format(to_delete_balances.count()))
             to_delete_balances.to_csv(balance_detail_file)
             to_delete_balances.delete()
+            logger.info('we create {} new balances.'.format(len(new_balances)))
             Balance.objects.bulk_create(new_balances)
 
     # nothing to do, we should keep all shares with detail
     if solved.count() <= settings.KEEP_SHARES_WITH_DETAIL_NUM:
+        logger.info('there is nothing to aggregate with shares. quiting aggregate task.')
         return
 
     # aggregating shares
@@ -353,13 +372,16 @@ def aggregate():
         last_share = solved[settings.KEEP_SHARES_WITH_DETAIL_NUM]
         to_be_aggregated = solved.filter(created_at__lte=last_share.created_at,
                                          is_aggregated=False)
+        logger.info('{} solved shares can be aggregated.'.format(to_be_aggregated.count()))
 
         # nothing to do
         if to_be_aggregated.count() == 0:
+            logger.info('there is nothing to aggregate with shares. quiting aggregate task.')
             return
 
         will_be_aggregated = Share.objects.filter(created_at__lte=to_be_aggregated.first().created_at,
                                                   status__in=statuses)
+        logger.info('{} shares will be aggregated.'.format(will_be_aggregated.count()))
         will_be_aggregated.to_csv(shares_detail_file)
         # for each round
         for ind, share in enumerate(to_be_aggregated):
@@ -394,10 +416,13 @@ def aggregate():
             ]
 
         # create aggregate objects
+        logger.info('we create AggregatedShare objects, {}.'.format(len(aggregated_shares)))
         AggregateShare.objects.bulk_create(aggregated_shares)
 
         # remove detail objects
-        Share.objects.filter(created_at__lte=to_be_aggregated.first().created_at, status__in=statuses).delete()
+        cur_delete = Share.objects.filter(created_at__lte=to_be_aggregated.first().created_at, status__in=statuses)
+        logger.info('we remove all aggregated shares: {}.'.format(cur_delete.count()))
+        cur_delete.delete()
 
         # update solved shares to aggregate
         to_be_aggregated.update(is_aggregated=True)
@@ -406,9 +431,13 @@ def aggregate():
     if solved.count() > settings.KEEP_SHARES_WITH_DETAIL_NUM + settings.KEEP_SHARES_AGGREGATION_NUM:
         last_share = solved[settings.KEEP_SHARES_WITH_DETAIL_NUM + settings.KEEP_SHARES_AGGREGATION_NUM]
         to_be_deleted = AggregateShare.objects.filter(solved_share__created_at__lte=last_share.created_at)
+        logger.info('we remove aggregated shares {}.'.format(to_be_deleted.count()))
 
         to_be_deleted.to_csv(shares_aggregate_file)
         to_be_deleted.delete()
+
+    else:
+        logger.info('no aggregated share to be deleted. done aggregating.')
 
 
 @app.task
@@ -439,23 +468,22 @@ def get_ergo_price():
             ExtraInfo.objects.create(key='ERGO_PRICE_BTC', value=str(btc_price))
             logger.info('created ergo price in usd.')
 
-    except Exception as ex:
-        print(ex)
-        logger.error('problem getting ergo price!')
+    except Exception as e:
+        logger.error('problem getting ergo price, {}.'.format(e))
 
 
 @app.task
 def periodic_verify_blocks():
     """
-    A periodic task for check transaction of share if transaction is valid,
-     flag transaction_valid set True else set False.
-    :return:
+    A periodic task for checking transaction of shares to see if the transaction is valid,
+     set transaction_valid True in case it is valid otherwise set False.
     """
     logger.info('running verify blocks task.')
     data_node = node_request('info')
     if data_node['status'] != 'success':
         logger.critical('can not get info from node! exiting.')
         return
+
     height = data_node['response']['fullHeight'] - 3
 
     # Get blocks solved lower than height with flag transaction_valid None
@@ -468,13 +496,23 @@ def periodic_verify_blocks():
     for share in shares:
         data_node = node_request('wallet/transactionById', params={'id': share.transaction_id})
         if data_node['status'] == 'success':
-            if data_node['response'][0]['inclusionHeight'] == share.block_height:
+            tx_height = data_node['response'][0]['inclusionHeight']
+            if tx_height == share.block_height:
+                logger.info('tx is valid.')
                 share.transaction_valid = True
             else:
+                logger.debug('tx {} is invalid, tx height: {}, share height: {}.'.format(tx_height, share.block_height,
+                                                                                         share.transaction_id))
                 share.transaction_valid = False
+
         elif data_node['status'] == 'not-found':
+            logger.debug('tx {} is invalid, tx is not present, response: {}.'.format(share.transaction_id,
+                                                                                     data_node))
             share.transaction_valid = False
         else:
-            logger.debug("response of node api 'wallet/transactionById' {}".format(data_node['response']))
+            logger.error("got non 200 response from node while getting txs info by id {}, res: {}.".
+                         format(share.transaction_id, data_node))
+
+    logger.info('bulk updating transaction_valid field of shares, len: {}.'.format(shares.count()))
     Share.objects.bulk_update(shares, ['transaction_valid'])
-    return
+    logger.info('done verifying blocks.')
