@@ -1,4 +1,4 @@
-from django.db.models import Count, Q, Sum
+from django.db.models import Q, Sum, Min, Max
 from django.db import transaction
 
 from .models import Share, Balance, Configuration, Address
@@ -105,7 +105,8 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         :param shares: share objects to be considered in calculating miners' share (as in money share not Share object)
         :return: list of tuples (miner, share)
         """
-        return shares.values_list('miner').annotate(Sum('difficulty'))
+        return shares.values_list('miner').annotate(Sum('difficulty'), Min('block_height'),
+                                                    Max('block_height'))
 
     def create_balance_from_share(self, shares, last_solved_share):
         """
@@ -123,7 +124,7 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         # a list of (miner's primary key, miner's valid shares) for this block mining round
         # miners_share_count = shares.values_list('miner').annotate(Count('difficulty'))
         miners_share_count = list(self.get_miner_shares(shares))
-        total_contribution = sum(share for _, share in miners_share_count)
+        total_contribution = sum(share for _, share, _, _ in miners_share_count)
 
         # delete all related balances if it's not the first execution
         # of prop function (according to the input share)
@@ -135,7 +136,9 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         logger.info('miners related to this share: {}.'.format(len(all_considered_miners)))
         logger.info('prev miners related to this share: {}.'.format(len(miner_to_prev_balances)))
 
-        miner_to_contribution = {miner: contribution for (miner, contribution) in miners_share_count}
+        miner_to_contribution = {miner: contribution for (miner, contribution, _, _) in miners_share_count}
+        miner_to_height = {miner: (min_height, max_height) for (miner, _, min_height, max_height)
+                           in miners_share_count}
         with transaction.atomic():
             # define "balances" as a list to create and save balance objects
             balances = list()
@@ -150,11 +153,15 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
                     # balance to decrease miner's reward
                     logger.info('balance of miner {} changes to {}, prev one is {}.'.
                                 format(miner_id, miner_reward, miner_prev_reward))
+                    min_height = miner_to_height[miner_id][0]
+                    max_height = miner_to_height[miner_id][1]
                     balances.append(Balance(
                         miner_id=miner_id,
                         share=last_solved_share,
                         status='immature',
-                        balance=miner_reward - miner_prev_reward)
+                        balance=miner_reward - miner_prev_reward,
+                        min_height=min_height,
+                        max_height=max_height),
                     )
 
             # create and save balances to database

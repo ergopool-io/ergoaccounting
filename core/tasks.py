@@ -37,11 +37,18 @@ def periodic_withdrawal():
         miner.public_key: 0 for miner in miners
     }
 
+    # miners to min and max height of his balances
+    pk_to_height = {
+        miner.public_key: (None, None) for miner in miners
+    }
+
     # update miners balances, balances with "withdraw", "pending_withdrawal" and "mature" status
     balances = Balance.objects.filter(status__in=["mature", "withdraw", "pending_withdrawal"]).\
-        values('miner__public_key').annotate(balance=Sum('balance'))
+        values('miner__public_key').annotate(balance=Sum('balance'), min_height=Min('min_height'),
+                                             max_height=Max('max_height'))
     for balance in balances:
         pk_to_total_balance[balance['miner__public_key']] += balance['balance']
+        pk_to_height[balance['miner__public_key']] = (balance['min_height'], balance['max_height'])
 
     DEFAULT_WITHDRAW_THRESHOLD = Configuration.objects.DEFAULT_WITHDRAW_THRESHOLD
     outputs = []
@@ -62,8 +69,8 @@ def periodic_withdrawal():
         logger.info('we will withdraw for {} miners.'.format(len(outputs)))
         # Creating balance object with pending_withdrawal status
         outputs = sorted(outputs)
-        objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance) for pk, balance in
-                   outputs]
+        objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance,
+                           min_height=pk_to_height[pk][0], max_height=pk_to_height[pk][1]) for pk, balance in outputs]
         Balance.objects.bulk_create(objects)
         outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
         generate_and_send_transaction(outputs)
@@ -103,6 +110,11 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
 
     pk_to_address = {
         miner.public_key: get_miner_payment_address(miner) for _, miner in pk_to_miner.items()
+    }
+
+    pk_to_height = {
+        bal.miner.public_key: (bal.min_height, bal.max_height)
+        for bal in Balance.objects.filter(pk__in=[x[2] for x in outputs])
     }
 
     invalid_requests = [(pk, amount, obj_id) for pk, amount, obj_id in outputs if pk_to_address[pk] is None]
@@ -164,22 +176,25 @@ def generate_and_send_transaction(outputs, subtract_fee=False):
             'inputsRaw': to_use_boxes
         }
 
-        # create balances with status pending_withdrawal
+        res = None
+        try:
+            res = node_request('wallet/transaction/send', data=data, request_type='post')
+        except Exception as e:
+            logger.critical('error while sending payments, {}.'.format(e))
+
         remove_pending_balances(chunk)
-        balances = [Balance(miner=pk_to_miner[pk],
-                            balance=-value, status="withdraw") for pk, value, _ in chunk]
-        Balance.objects.bulk_create(balances)
-
-        res = node_request('wallet/transaction/send', data=data, request_type='post')
-
-        if res['status'] != 'success':
-            Balance.objects.filter(id__in=[balance.id for balance in balances]).delete()
-            logger.critical('can not create and send the transaction {}, response: {}'.format(data, res))
-            remove_pending_balances(outputs[chuck_start + MAX_NUMBER_OF_OUTPUTS:])
-            return
+        if res['status'] == 'success':
+            logger.info('tx was sent successfully, {}.'.format(res))
+            balances = [Balance(miner=pk_to_miner[pk], balance=-value, status="withdraw",
+                                tx_id=res['response'], min_height=pk_to_height[pk][0],
+                                max_height=pk_to_height[pk][1])for pk, value, _ in chunk]
+            Balance.objects.bulk_create(balances)
 
         else:
-            logger.info('sent txs, response: {}.'.format(res))
+            logger.critical('can not create and send the transaction {}, response: {}'.format(data, res))
+            remove_pending_balances(outputs[chuck_start + MAX_NUMBER_OF_OUTPUTS:])
+            logger.error('quiting sending remaining transactions.')
+            return
 
 
 @app.task
