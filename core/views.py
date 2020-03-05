@@ -1,32 +1,34 @@
 import logging
 from datetime import datetime, timedelta
 from pydoc import locate
-import requests
-from django.http import QueryDict
 from urllib.parse import urljoin
 
+import django_filters as filters_rest
+import requests
 from django.conf import settings
 from django.db.models import Q, Count, Sum, Max, Min
 from django.db.utils import DataError
+from django.http import QueryDict
 from django.utils import timezone
 from django.utils.timezone import get_current_timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
-from rest_framework.decorators import action
-from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
-from rest_framework.response import Response
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authtoken.models import Token
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-import django_filters as filters_rest
+from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
     LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT, \
     TOTAL_PERIOD_COUNT_SHARE
 from core.authentication import CustomPermission
-from core.models import Share, Miner, MinerIP, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
+from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo
-from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
+from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
+    ErgoAuthTokenSerializer
 from core.tasks import generate_and_send_transaction
 from core.utils import RewardAlgorithm, BlockDataIterable
 
@@ -162,7 +164,8 @@ class ConfigurationViewSet(viewsets.GenericViewSet,
             serializer.save()
             return Response(request.data, status=status.HTTP_200_OK)
 
-        return Response({'message': 'Some fields are not valid.', "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': 'Some fields are not valid.', "errors": serializer.errors},
+                        status=status.HTTP_400_BAD_REQUEST)
 
     def list(self, request, *args, **kwargs):
         """
@@ -478,9 +481,9 @@ class UserApiViewSet(viewsets.GenericViewSet,
             'timestamp': round_start_time.strftime('%Y-%m-%d %H:%M:%S'),
             "hash_rate": {
                 # Hash-rate in period PERIOD_DIAGRAM
-                "current": int((total_count.get("sum_period_diagram_difficulty") or 0)/PERIOD_DIAGRAM or 1),
+                "current": int((total_count.get("sum_period_diagram_difficulty") or 0) / PERIOD_DIAGRAM or 1),
                 # Hash-rate in period TOTAL_PERIOD_HASH_RATE
-                "avg": int((total_count.get("sum_total_difficulty") or 0)/TOTAL_PERIOD_HASH_RATE or 1)
+                "avg": int((total_count.get("sum_total_difficulty") or 0) / TOTAL_PERIOD_HASH_RATE or 1)
             }
         }
 
@@ -543,10 +546,11 @@ class UserApiViewSet(viewsets.GenericViewSet,
                 "mature": int(row_dict.get("mature") or 0),
                 "withdraw": int(row_dict.get("withdraw") or 0),
                 "hash_rate": {
-                    "current": int((row_dict.get("sum_period_diagram_difficulty") or 0)/PERIOD_DIAGRAM) or 1,
-                    "avg": int((row_dict.get("sum_total_difficulty") or 0)/TOTAL_PERIOD_HASH_RATE) or 1
+                    "current": int((row_dict.get("sum_period_diagram_difficulty") or 0) / PERIOD_DIAGRAM) or 1,
+                    "avg": int((row_dict.get("sum_total_difficulty") or 0) / TOTAL_PERIOD_HASH_RATE) or 1
                 }
             }
+
         if user_pk:
             response[user_pk] = convert_row(temp[list(temp.keys())[0]] if len(round_shares) > 0 else {})
         else:
@@ -653,8 +657,8 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
 
         response = {
             "hash_rate": {
-                "network": int(difficulty_network/PERIOD_DIAGRAM) + 1,
-                "pool": int((pool_hash_rate.get("sum_total_difficulty") or 0)/PERIOD_DIAGRAM) or 1
+                "network": int(difficulty_network / PERIOD_DIAGRAM) + 1,
+                "pool": int((pool_hash_rate.get("sum_total_difficulty") or 0) / PERIOD_DIAGRAM) or 1
             },
             "miners": count_miner,
             "active_miners": active_miners_count,
@@ -662,7 +666,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 'btc': price_btc,
                 'usd': price_usd
             },
-            "blocks_in_hour": solution_count / (TOTAL_PERIOD_COUNT_SHARE/3600)
+            "blocks_in_hour": solution_count / (TOTAL_PERIOD_COUNT_SHARE / 3600)
         }
 
         return Response(response)
@@ -788,3 +792,26 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 response.append(convert_row(item))
             return self.get_paginated_response(response)
         return Response(response)
+
+
+class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.ListModelMixin):
+    serializer_class = ErgoAuthTokenSerializer
+    queryset = Token.objects.all()
+
+    def list(self, request, *args, **kwargs):
+        """
+        this api view return all required configuration to authenticate to system
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        return Response({"site_key": settings.RECAPTCHA_SITE_KEY})
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        token, created = Token.objects.get_or_create(user=user)
+        headers = self.get_success_headers(serializer.data)
+        return Response({'token': token.key}, status=status.HTTP_201_CREATED, headers=headers)
