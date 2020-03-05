@@ -2660,8 +2660,8 @@ class AggregateTestCase(TestCase):
 
         self.assertTrue(os.path.exists(self.shares_detail_file))
         with open(self.shares_detail_file, 'r') as file:
-            content = file.read()
-            self.assertEqual(share_detail_content, content)
+            content = sorted(file.read().split('\n'))
+            self.assertEqual(sorted(share_detail_content.split('\n')), content)
 
         self.assertTrue(os.path.exists(self.shares_aggregate_file))
         with open(self.shares_aggregate_file, 'r') as file:
@@ -2720,8 +2720,8 @@ class AggregateTestCase(TestCase):
                                            (self.shares_detail_file, share_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read()
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def test_share_6_with_detail_other_aggregated_some_miners_not_exist_in_round(self, mocked_time):
         """
@@ -2785,8 +2785,8 @@ class AggregateTestCase(TestCase):
                                            (self.shares_detail_file, share_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read()
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def test_share_5_detail_3_aggregated(self, mocked_time):
         """
@@ -2857,8 +2857,8 @@ class AggregateTestCase(TestCase):
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r')as file:
-                content = file.read()
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def test_balance_all_with_detail_some_without_share(self, mocked_time):
         """
@@ -2897,8 +2897,8 @@ class AggregateTestCase(TestCase):
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read()
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     @override_settings(KEEP_BALANCE_WITH_DETAIL_NUM=0)
     def test_balance_all_with_detail_no_detail_remain(self, mocked_time):
@@ -2928,8 +2928,8 @@ class AggregateTestCase(TestCase):
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read()
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def test_balance_all_with_detail_with_immature_and_pending(self, mocked_time):
         """
@@ -2970,12 +2970,11 @@ class AggregateTestCase(TestCase):
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read()
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def tearDown(self):
         Configuration.objects.all().delete()
-        # restoring setting parameters
         Miner.objects.all().delete()
         Share.objects.all().delete()
         Balance.objects.all().delete()
@@ -3051,6 +3050,7 @@ class GetMinerAddressTestCase(TestCase):
         Miner.objects.all().delete()
         Address.objects.all().delete()
         Share.objects.all().delete()
+        AggregateShare.objects.all().delete()
         Balance.objects.all().delete()
 
 
