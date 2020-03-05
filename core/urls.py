@@ -1,5 +1,6 @@
-from django.urls import path
 from rest_framework import routers
+from django.urls import path
+
 from rest_framework.authtoken.views import obtain_auth_token
 
 from .views import *
@@ -11,6 +12,7 @@ router.register(r'conf', ConfigurationViewSet)
 router.register(r'user', UserApiViewSet, basename='ApiUser')
 router.register(r'blocks', BlockView, basename='Blocks')
 router.register(r'info', InfoViewSet, basename='Info')
+router.register(r'administrator/users', AdministratorUserViewSet, basename='Administrator')
 
 urlpatterns = router.urls
 urlpatterns += [

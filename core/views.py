@@ -1,25 +1,30 @@
 import logging
 from datetime import datetime, timedelta
 from pydoc import locate
+import requests
+from django.http import QueryDict
 from urllib.parse import urljoin
 
-import requests
 from django.conf import settings
 from django.db.models import Q, Count, Sum, Max, Min
+from django.db.utils import DataError
 from django.utils import timezone
 from django.utils.timezone import get_current_timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
-from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
 from rest_framework.response import Response
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
+import django_filters as filters_rest
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
     LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT, \
     TOTAL_PERIOD_COUNT_SHARE
 from core.authentication import CustomPermission
-from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
+from core.models import Share, Miner, MinerIP, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer
 from core.tasks import generate_and_send_transaction
@@ -662,3 +667,124 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
 
         return Response(response)
 
+
+class UserFilter(filters_rest.FilterSet):
+    """
+    For set filter of range on users
+    TODO: implement filter on status field
+    """
+    STATUS_CHOICES = (
+        ('active', 'active'),
+        ('inactive', 'inactive')
+    )
+    valid_shares = filters_rest.RangeFilter()
+    sum_period_diagram_difficulty = filters_rest.RangeFilter()
+    # status = filters_rest.ChoiceFilter(choices=STATUS_CHOICES)
+
+    class Meta:
+        fields = ["valid_shares", "sum_period_diagram_difficulty"]
+
+
+class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
+    """
+    This viewSet use for show information of miner to admin
+    """
+    queryset = Miner.objects.all()
+    pagination_class = CustomPaginationLimitOffset
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['user', 'hash_rate', 'valid_shares', 'invalid_shares', 'last_ip', 'status']
+    original_ordering = {
+        'user': 'public_key',
+        '-user': '-public_key',
+        'last_ip': 'ip',
+        '-last_ip': '-ip',
+        'hash_rate': 'sum_period_diagram_difficulty',
+        '-hash_rate': '-sum_period_diagram_difficulty'
+    }
+    ordering = 'user'
+
+    # For session authentication
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    # For token authentication
+    permission_classes = (IsAuthenticated,)
+
+    def get_miners(self):
+        """
+        Function for get miners from data_base
+        :return: miners
+        """
+        # validate ordering params
+        ordering_fields = self.ordering_fields
+        ordering_fields = ordering_fields + ['-' + i for i in ordering_fields]
+        field = self.request.query_params.get('ordering')
+        order = field if field in ordering_fields else self.ordering
+        # change query params to original ordering field 
+        if order in self.original_ordering:
+            order = self.original_ordering[order]
+
+        miners = Miner.objects.values('public_key', 'ip').annotate(
+            sum_period_diagram_difficulty=Sum('share__difficulty',
+                                              filter=Q(
+                                                  share__status__in=['valid', 'solved']
+                                              ) & Q(
+                                                  share__created_at__gte=(
+                                                          timezone.now() - timedelta(seconds=PERIOD_DIAGRAM)))),
+            valid_shares=Count('share__id', filter=Q(share__status__in=["solved", "valid"]), distinct=True),
+            invalid_shares=Count('share__id', filter=Q(share__status__in=["repetitious", "invalid"]), distinct=True
+                                 )).order_by(order)
+        # change hash_rate params to sum_period_diagram_difficulty_min for set query and
+        # multiplication in PERIOD_DIAGRAM for set range filter on hash_rate
+        request_get = dict(self.request.GET)
+        if 'hash_rate_min' in request_get:
+            request_get['sum_period_diagram_difficulty_min'] = str(int(request_get['hash_rate_min'][0]) * PERIOD_DIAGRAM)
+            request_get.pop('hash_rate_min')
+        if 'hash_rate_max' in request_get:
+            request_get['sum_period_diagram_difficulty_max'] = str(int(request_get['hash_rate_max'][0]) * PERIOD_DIAGRAM)
+            request_get.pop('hash_rate_max')
+        # convert dict to query_dict
+        data_request = {}
+        for i in request_get:
+            data_request.update({i: request_get[i][0]} if isinstance(request_get[i], list) else {i: request_get[i]})
+        data_request_query = QueryDict('', mutable=True)
+        data_request_query.update(data_request)
+        # set filters on query except ip filter
+        miners = UserFilter(data_request_query, queryset=miners).qs
+        # set range filter on last_ip
+        if 'last_ip_min' in data_request_query and 'last_ip_max' in data_request_query:
+            miners = miners.filter(Q(ip__range=[data_request_query['last_ip_min'], data_request_query['last_ip_max']]))
+        elif 'last_ip_min' in data_request_query:
+            miners = miners.filter(Q(ip__gte=data_request_query['last_ip_min']))
+        elif 'last_ip_max' in data_request_query:
+            miners = miners.filter(Q(ip__lte=data_request_query['last_ip_max']))
+
+        return miners
+
+    def list(self, request, *args, **kwargs):
+
+        def convert_row(row_dict):
+            """
+            Function for create response
+            :param row_dict: dictionary of data
+            :return: template of data
+            """
+            return {
+                "user": str(row_dict.get("public_key")),
+                "hash_rate": int((row_dict.get("sum_period_diagram_difficulty") or 0) / PERIOD_DIAGRAM) or 1,
+                "valid_shares": int(row_dict.get("valid_shares") or 0),
+                "invalid_shares": int(row_dict.get("invalid_shares") or 0),
+                "last_ip": row_dict.get("ip"),
+                "status": "active"
+            }
+        # set pagination on response
+        try:
+            page = self.paginate_queryset(self.get_miners())
+        except DataError as e:
+            logging.info("Filter range for last_ip is invalid.")
+            logging.info(e)
+            raise ValidationError("Filter range for last_ip is invalid.")
+        response = []
+        if page is not None:
+            for item in page:
+                response.append(convert_row(item))
+            return self.get_paginated_response(response)
+        return Response(response)
