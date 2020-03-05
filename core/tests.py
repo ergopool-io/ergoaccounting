@@ -176,7 +176,7 @@ class ShareTestCase(TestCase):
 
     def test_solved_share(self):
         """
-        test if a solution submitted must store in database
+        test if a solution submitted must store in database and save last ip in field ip
         :return:
         """
         share = uuid.uuid4().hex
@@ -189,11 +189,27 @@ class ShareTestCase(TestCase):
                 'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': ['test'],
+                'client_ip': '127.0.0.5',
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+
+        data = {"share": share + 'bhkk',
+                'miner': '1',
+                'nonce': '1',
+                "transaction_id": "gffdthis is a transaction id",
+                "block_height": 404054,
+                'status': 'solved',
+                'pow_identity': "test",
+                'parent_id': 'test',
+                'next_ids': ['test'],
                 'client_ip': '127.0.0.1',
                 'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
+
         self.assertTrue(Share.objects.filter(share=share).exists())
         self.assertTrue(Share.objects.filter(parent_id='test').exists())
         self.assertTrue(MinerIP.objects.filter(ip='127.0.0.1').exists())
@@ -3154,3 +3170,103 @@ class PeriodicVerifyBlocks(TestCase):
         Miner.objects.all().delete()
         Share.objects.all().delete()
         Balance.objects.all().delete()
+
+
+class AdministratorUserTestCase(TestCase):
+    """
+    test route administrator/users
+    result of every miner similar this
+    {
+        "user": public_key,
+        "hash_rate": int,
+        "valid_shares": int,
+        "invalid_shares": int,
+        "last_ip": last ip of miner,
+        "status": active or inactive
+    }
+    """
+    def setUp(self):
+        """
+        Create 4 miners and set miner ip for them so call 10 shares for every miners and set authenticate.
+        :return:
+        """
+        for i in range(1, 5):
+            miner = Miner.objects.create(public_key=i, ip='127.0.0.{}'.format(i))
+
+        miner = Miner.objects.all()
+
+        for x in range(10):
+            Share.objects.create(miner=miner[0], transaction_id=str(x), difficulty=10000, block_height=str(x),
+                                 status='solved', parent_id='1')
+            Share.objects.create(miner=miner[1], transaction_id=str(x), difficulty=10000, block_height=str(x),
+                                 status='invalid', parent_id='1')
+            Share.objects.create(miner=miner[2], transaction_id=str(x), difficulty=10000, block_height=str(x),
+                                 status='repetitious', parent_id='1')
+            Share.objects.create(miner=miner[3], transaction_id=str(x), difficulty=20000, block_height=str(x),
+                                 status='valid', parent_id='1')
+        # set session authenticate
+        self.factory = RequestFactory()
+        User.objects.create_user(username='test', password='test')
+        self.client = APIClient()
+        self.client.login(username='test', password='test')
+
+    def test_call_api_normal(self):
+        """
+        We expect with call route /administrator/users/ get all miners.
+        """
+        # Call route /administrator/users/
+        response = self.client.get('/administrator/users/').json()
+        # Expected output
+        with open("core/data_testing/administrator_user_normal.json", "r") as read_file:
+            file = json.load(read_file)
+
+        self.assertEqual(response, file)
+
+    def test_call_api_query_1(self):
+        """
+        We expect with call route /administrator/users/ get miners that has last_ip with range 127.0.0.2 - 127.0.0.10
+         and sorted according to user.
+        """
+        # Call route /administrator/users/
+        data = {
+            'last_ip_min': '127.0.0.2',
+            'last_ip_max': '127.0.0.10',
+            'ordering': '-last_ip'
+        }
+        response = self.client.get('/administrator/users/', data, content_type='application/json').json()
+        # Expected output
+        with open("core/data_testing/administrator_user_query_1.json", "r") as read_file:
+            file = json.load(read_file)
+
+        self.assertEqual(response, file)
+
+    def test_call_api_query_2(self):
+        """
+        We expect with call route /administrator/users/ get miners that has hash_rate with range 50 - 150
+         and lat_ip bigger than 127.0.0.2
+        """
+        # Call route /administrator/users/
+        data = {
+            'hash_rate_min': '50',
+            'hash_rate_max': '150',
+            'last_ip_min': '127.0.0.2'
+        }
+        response = self.client.get('/administrator/users/', data, content_type='application/json').json()
+        # Expected output
+        with open("core/data_testing/administrator_user_query_2.json", "r") as read_file:
+            file = json.load(read_file)
+
+        self.assertEqual(response, file)
+
+    def test_call_api_query_3(self):
+        """
+        We expect with call route /administrator/users/ get exception because ip is invalid
+        """
+        # Call route /administrator/users/
+        data = {
+            'last_ip_max': '127.0.0.1116'
+        }
+        response = self.client.get('/administrator/users/', data, content_type='application/json').json()
+
+        self.assertEqual(response, ['Filter range for last_ip is invalid.'])
+
