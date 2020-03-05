@@ -22,6 +22,9 @@ class ShareSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # Save ip of client in table of Detail Client
         client_ip = validated_data.pop('client_ip')
+        if not validated_data.get('miner').ip == client_ip:
+            validated_data.get('miner').ip = client_ip
+            validated_data.get('miner').save()
         obj, exist = MinerIP.objects.get_or_create(miner=validated_data.get('miner'), ip=client_ip)
         obj.save()
 

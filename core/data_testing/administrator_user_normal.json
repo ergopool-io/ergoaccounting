@@ -1,0 +1,39 @@
+{
+    "count": 4,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "user": "1",
+            "hash_rate": 55,
+            "valid_shares": 10,
+            "invalid_shares": 0,
+            "last_ip": "127.0.0.1",
+            "status": "active"
+        },
+        {
+            "user": "2",
+            "hash_rate": 1,
+            "valid_shares": 0,
+            "invalid_shares": 10,
+            "last_ip": "127.0.0.2",
+            "status": "active"
+        },
+        {
+            "user": "3",
+            "hash_rate": 1,
+            "valid_shares": 0,
+            "invalid_shares": 10,
+            "last_ip": "127.0.0.3",
+            "status": "active"
+        },
+        {
+            "user": "4",
+            "hash_rate": 111,
+            "valid_shares": 10,
+            "invalid_shares": 0,
+            "last_ip": "127.0.0.4",
+            "status": "active"
+        }
+    ]
+}
