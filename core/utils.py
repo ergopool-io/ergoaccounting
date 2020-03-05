@@ -350,3 +350,14 @@ def get_miner_payment_address(miner):
 
     logger.error('miner {} does not have an address for withdrawal.'.format(miner.public_key))
     return None
+
+
+def verify_recaptcha(recaptcha_code):
+    url = "https://www.google.com/recaptcha/api/siteverify"
+    post_data = {
+        "secret": settings.RECAPTCHA,
+        "response": recaptcha_code
+    }
+    response = requests.post(url, data=post_data)
+    return response["success"]
+
