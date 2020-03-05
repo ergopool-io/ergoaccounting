@@ -1,0 +1,15 @@
+{
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "user": "4",
+      "hash_rate": 111,
+      "valid_shares": 10,
+      "invalid_shares": 0,
+      "last_ip": "127.0.0.4",
+      "status": "active"
+    }
+  ]
+}
