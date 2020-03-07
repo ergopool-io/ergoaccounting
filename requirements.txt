@@ -10,4 +10,6 @@ frozendict>=1.2,<1.3
 pycoingecko
 django-postgres-copy
 django-filter==2.2
+django-otp==0.8.1
+qrcode==6.1
 
