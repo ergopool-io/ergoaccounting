@@ -1,6 +1,5 @@
 from rest_framework import routers
-from django.urls import path, include
-# from two_factor.urls import urlpatterns as tf_urls
+from django.urls import path
 from rest_framework.authtoken.views import obtain_auth_token
 
 from .views import *
