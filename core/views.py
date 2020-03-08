@@ -830,7 +830,8 @@ class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins
     # For token authentication
     permission_classes = (IsAuthenticated,)
 
-    def get_qr_code(self, device_url):
+    @staticmethod
+    def get_qr_code(device_url):
         """
         Create QR code base64 from otp-url
         """
