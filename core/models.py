@@ -5,6 +5,8 @@ from django.contrib.postgres.fields import ArrayField
 from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
 from frozendict import frozendict
+from postgres_copy import CopyManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +21,8 @@ EXTRA_INFO_KEY_TYPE = frozendict({
 })
 
 
-
 CONFIGURATION_KEY_CHOICE = (
+    ("POOL_BASE_FACTOR", "Pool base factor"),
     # total reward of a round
     ("TOTAL_REWARD", "TOTAL_REWARD"),
     # total_reward factor
@@ -32,8 +34,6 @@ CONFIGURATION_KEY_CHOICE = (
     # maximum reward anyone can receive in reward sharing
     ("MAX_REWARD", "MAX_REWARD"),
     ("PPLNS_N", "PPLNS_N"),
-    # period time of hash rate
-    ("PERIOD_TIME", "HASH_PERIOD_TIME"),
     # reward algorithm used for sharing reward
     ("REWARD_ALGORITHM", "REWARD_ALGORITHM"),
     # transaction fee of a transaction, 0.001
@@ -47,41 +47,49 @@ CONFIGURATION_KEY_CHOICE = (
     # default value for periodic withdrawal if not set by miner explicitly
     ("DEFAULT_WITHDRAW_THRESHOLD", "DEFAULT_WITHDRAW_THRESHOLD"),
     # confirmation length for balances to be mature
-    ("CONFIRMATION_LENGTH", "confirmation length")
+    ("CONFIRMATION_LENGTH", "confirmation length"),
+    # latest allowed height for mining
+    ("THRESHOLD_HEIGHT", "latest allowed height for mining"),
+    # timestamp diff allowed to miner
+    ("THRESHOLD_TIMESTAMP", "timestamp diff allowed to miner"),
 )
 
 CONFIGURATION_KEY_TO_TYPE = frozendict({
+    "POOL_BASE_FACTOR": "int",
     "TOTAL_REWARD": "int",
     "REWARD_FACTOR": "float",
     "FEE_FACTOR": "float",
     "REWARD_FACTOR_PRECISION": "int",
     "MAX_REWARD": "int",
     "PPLNS_N": "int",
-    "PERIOD_TIME": "float",
     'REWARD_ALGORITHM': 'str',
     'TRANSACTION_FEE': 'int',
     "MAX_NUMBER_OF_OUTPUTS": 'int',
     "MAX_WITHDRAW_THRESHOLD": 'int',
     "MIN_WITHDRAW_THRESHOLD": 'int',
     "DEFAULT_WITHDRAW_THRESHOLD": 'int',
-    "CONFIRMATION_LENGTH": 'int'
+    "CONFIRMATION_LENGTH": 'int',
+    "THRESHOLD_HEIGHT": 'int',
+    "THRESHOLD_TIMESTAMP": 'int',
 })
 
 CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
+    'POOL_BASE_FACTOR': 1000,
     'TOTAL_REWARD': int(67.5e9),
     "REWARD_FACTOR": 0.96296297,
     'FEE_FACTOR': 0,
     "REWARD_FACTOR_PRECISION": 2,
     'MAX_REWARD': int(35e9),
     'PPLNS_N': 5,
-    'PERIOD_TIME': 24 * 60 * 60,
     'REWARD_ALGORITHM': 'Prop',
     'TRANSACTION_FEE': 1000000,
     "MAX_NUMBER_OF_OUTPUTS": 5,
     "MAX_WITHDRAW_THRESHOLD": int(100e9),
     "MIN_WITHDRAW_THRESHOLD": int(1e9),
     "DEFAULT_WITHDRAW_THRESHOLD": int(100e9),
-    "CONFIRMATION_LENGTH": 720
+    "CONFIRMATION_LENGTH": 720,
+    "THRESHOLD_HEIGHT": 10,
+    "THRESHOLD_TIMESTAMP": 120,
 })
 
 
@@ -89,7 +97,7 @@ class Miner(models.Model):
     nick_name = models.CharField(max_length=255, blank=True)
     public_key = models.CharField(max_length=256, unique=True)
     periodic_withdrawal_amount = models.BigIntegerField(null=True)
-    selected_address = models.ForeignKey('core.Address', on_delete=models.SET_NULL, null=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -126,11 +134,13 @@ class Share(models.Model):
     miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     status = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
     transaction_id = models.CharField(max_length=80, blank=True, null=True)
+    transaction_valid = models.BooleanField(blank=True, null=True)
     difficulty = models.BigIntegerField(blank=False)
     block_height = models.BigIntegerField(blank=True, null=True)
     parent_id = models.CharField(max_length=80, null=False, blank=False, default="0")
     next_ids = ArrayField(models.CharField(max_length=80, blank=True, null=True), blank=True, null=True, default=list)
     path = models.CharField(max_length=100, blank=True, null=True)
+    pow_identity = models.CharField(max_length=200, blank=True, null=True)
     is_aggregated = models.BooleanField(default=False)
     miner_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='miner_addresses')
     lock_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='lock_addresses')
@@ -138,6 +148,7 @@ class Share(models.Model):
     is_orphaned = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = CopyManager()
 
     def __str__(self):
         return '{}-{}'.format(self.miner.public_key, self.share)
@@ -168,8 +179,12 @@ class Balance(models.Model):
     share = models.ForeignKey(Share, on_delete=models.CASCADE, null=True)
     balance = models.BigIntegerField(default=0)
     status = models.CharField(blank=False, choices=STATUS_CHOICE, default="immature", max_length=100)
+    tx_id = models.CharField(blank=True, null=True, max_length=100)
+    min_height = models.IntegerField(null=True)
+    max_height = models.IntegerField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = CopyManager()
 
     class Meta:
         indexes = [
@@ -192,6 +207,7 @@ class AggregateShare(models.Model):
     repetitious_num = models.PositiveIntegerField()
     difficulty_sum = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
+    objects = CopyManager()
 
 
 class ConfigurationManager(models.Manager):

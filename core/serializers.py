@@ -1,4 +1,8 @@
+from django.contrib.auth import authenticate
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
+from django.utils.translation import ugettext_lazy as _
+from core import utils
 from .models import *
 import logging
 
@@ -22,6 +26,9 @@ class ShareSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # Save ip of client in table of Detail Client
         client_ip = validated_data.pop('client_ip')
+        if not validated_data.get('miner').ip == client_ip:
+            validated_data.get('miner').ip = client_ip
+            validated_data.get('miner').save()
         obj, exist = MinerIP.objects.get_or_create(miner=validated_data.get('miner'), ip=client_ip)
         obj.save()
 
@@ -35,11 +42,14 @@ class ShareSerializer(serializers.ModelSerializer):
         :return:
         """
         if attrs.get("status") == 'solved':
+            if not attrs.get("pow_identity"):
+                logger.error('pow_identity field must be present for solved shares.')
+                raise serializers.ValidationError("pow_identity field must be present for solved shares.")
             if not attrs.get("transaction_id"):
-                logger.debug('Transaction id is not provided for solved share.')
+                logger.error('Transaction id is not provided for solved share.')
                 raise serializers.ValidationError("transaction id is required when solved solution received")
             if not attrs.get("block_height"):
-                logger.debug('Block height is not provided for solved share.')
+                logger.error('Block height is not provided for solved share.')
                 raise serializers.ValidationError("block height is required when solved solution received")
         else:
             if 'transaction_id' in attrs:
@@ -50,10 +60,10 @@ class ShareSerializer(serializers.ModelSerializer):
         # in status of solved or valid parent_id and next parameters is required
         if attrs.get("status") == 'solved' or attrs.get("status") == 'valid':
             if not attrs.get("parent_id"):
-                logger.debug('parent id is not provided for solved share.')
+                logger.error('parent id is not provided for solved share.')
                 raise serializers.ValidationError("parent id is required when solved or valid solution received")
             if not attrs.get("path"):
-                logger.debug('path is not provided for solved or valid share.')
+                logger.error('path is not provided for solved or valid share.')
                 raise serializers.ValidationError("path is required when solved or valid solution received")
         else:
             if 'parent_id' in attrs:
@@ -67,8 +77,8 @@ class ShareSerializer(serializers.ModelSerializer):
         model = Share
         fields = ['share', 'miner', 'status', 'transaction_id', 'block_height', 'difficulty',
                   'created_at', 'miner_address', 'lock_address', 'withdraw_address', 'parent_id',
-                  'next_ids', 'path', 'client_ip']
-        write_only_fields = ['transaction_id', 'block_height', 'parent_id', 'next_ids', 'path', 'client_ip']
+                  'next_ids', 'path', 'client_ip', 'pow_identity']
+        write_only_fields = ['transaction_id', 'block_height', 'parent_id', 'next_ids', 'path', 'client_ip', 'pow_identity']
 
 
 class BalanceSerializer(serializers.ModelSerializer):
@@ -82,6 +92,29 @@ class ConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Configuration
         fields = ['key', 'value']
+
+    def create(self, validated_data):
+        key = validated_data['key']
+        value = validated_data['value']
+        configurations = Configuration.objects.filter(key=key)
+        val_type = CONFIGURATION_KEY_TO_TYPE[key]
+        try:
+            locate(val_type)(value)
+
+        except:
+            return
+
+        if not configurations:
+            logger.info('Saving new configuration.')
+            super().create(validated_data)
+        else:
+            logger.info('Updating configuration')
+            configuration = Configuration.objects.get(key=key)
+            configuration.value = value
+            configuration.save()
+
+    def save(self, **kwargs):
+        pass
 
 
 class MinerSerializer(serializers.ModelSerializer):
@@ -102,3 +135,36 @@ class MinerSerializer(serializers.ModelSerializer):
         return value
 
 
+class ErgoAuthTokenSerializer(serializers.Serializer):
+    username = serializers.CharField(label=_("Username"))
+    password = serializers.CharField(
+        label=_("Password"),
+        style={'input_type': 'password'},
+        trim_whitespace=False
+    )
+    recaptcha_code = serializers.CharField(label="recaptcha code")
+
+    def validade_recaptcha_code(self, value):
+        if not utils.verify_recaptcha(value):
+            raise ValidationError("please verify recaptcha code")
+
+    def validate(self, attrs):
+        username = attrs.get('username')
+        password = attrs.get('password')
+
+        if username and password:
+            user = authenticate(request=self.context.get('request'),
+                                username=username, password=password)
+
+            # The authenticate call simply returns None for is_active=False
+            # users. (Assuming the default ModelBackend authentication
+            # backend.)
+            if not user:
+                msg = _('Unable to log in with provided credentials.')
+                raise serializers.ValidationError(msg, code='authorization')
+        else:
+            msg = _('Must include "username" and "password".')
+            raise serializers.ValidationError(msg, code='authorization')
+
+        attrs['user'] = user
+        return attrs

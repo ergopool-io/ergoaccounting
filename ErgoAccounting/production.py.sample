@@ -117,6 +117,11 @@ app.conf.beat_schedule = {
         'schedule': parse_cron_tab(os.environ.get('PERIODIC_GET_ERGO_PRICE'), 3600),
         'args': ()
     },
+    'periodic_verify_blocks': {
+        'task': 'core.tasks.periodic_verify_blocks',
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_VERIFY_BLOCKS'), 300),
+        'args': ()
+    },
 }
 
 # aggregate parameters, please set with a confidence threshold
@@ -140,3 +145,11 @@ LIMIT_NUMBER_CHUNK_DIAGRAM = 1000
 NUMBER_OF_LAST_INCOME = 1000
 # time stamp for start payout if not exist
 DEFAULT_START_PAYOUT = 1000000000
+# period for get active miners (1 hour)
+PERIOD_ACTIVE_MINERS_COUNT = 3600
+# count share in specific period 1-Day (second)
+TOTAL_PERIOD_COUNT_SHARE = 24 * 60 * 60
+
+
+RECAPTCHA_SECRET = ""
+RECAPTCHA_SITE_KEY = ""

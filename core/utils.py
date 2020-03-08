@@ -1,4 +1,4 @@
-from django.db.models import Count, Q, Sum
+from django.db.models import Q, Sum, Min, Max
 from django.db import transaction
 
 from .models import Share, Balance, Configuration, Address
@@ -34,9 +34,10 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         If the input share isn't 'solved', it will be invalid and the function do nothing.
         :return: nothing
         """
-        logger.info('running {} algorithm'.format(self.__class__.__name__))
+        logger.info('running {} reward algorithm for share {}.'.format(self.__class__.__name__, share.share))
 
         if not self.should_run_reward_algorithm(share):
+            logger.debug('quiting reward algorithm, should not run now!')
             return
 
         # finding the penultimate valid share
@@ -50,8 +51,6 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
 
         # share reward for these shares
         self.create_balance_from_share(shares, share)
-
-        return
 
     @abc.abstractmethod
     def get_beginning_share(self, considered_time):
@@ -106,7 +105,8 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         :param shares: share objects to be considered in calculating miners' share (as in money share not Share object)
         :return: list of tuples (miner, share)
         """
-        return shares.values_list('miner').annotate(Sum('difficulty'))
+        return shares.values_list('miner').annotate(Sum('difficulty'), Min('block_height'),
+                                                    Max('block_height'))
 
     def create_balance_from_share(self, shares, last_solved_share):
         """
@@ -124,17 +124,21 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         # a list of (miner's primary key, miner's valid shares) for this block mining round
         # miners_share_count = shares.values_list('miner').annotate(Count('difficulty'))
         miners_share_count = list(self.get_miner_shares(shares))
-        total_contribution = sum(share for _, share in miners_share_count)
+        total_contribution = sum(share for _, share, _, _ in miners_share_count)
 
         # delete all related balances if it's not the first execution
         # of prop function (according to the input share)
-        # TODo
-        # Balance.objects.filter(share=share).delete()
         prev_balances = Balance.objects.filter(share=last_solved_share).values('miner').annotate(balance=Sum('balance'))
+        logger.info('prev balances len: {}.'.format(last_solved_share.share, prev_balances.count()))
         miner_to_prev_balances = {bal['miner']: bal['balance'] for bal in prev_balances}
         all_considered_miners = set(list(miner_to_prev_balances.keys()) + [x[0] for x in miners_share_count])
 
-        miner_to_contribution = {miner: contribution for (miner, contribution) in miners_share_count}
+        logger.info('miners related to this share: {}.'.format(len(all_considered_miners)))
+        logger.info('prev miners related to this share: {}.'.format(len(miner_to_prev_balances)))
+
+        miner_to_contribution = {miner: contribution for (miner, contribution, _, _) in miners_share_count}
+        miner_to_height = {miner: (min_height, max_height) for (miner, _, min_height, max_height)
+                           in miners_share_count}
         with transaction.atomic():
             # define "balances" as a list to create and save balance objects
             balances = list()
@@ -147,14 +151,21 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
                 if miner_reward != miner_prev_reward:
                     # here we should either increase immature balances or create orphaned immature
                     # balance to decrease miner's reward
+                    logger.info('balance of miner {} changes to {}, prev one is {}.'.
+                                format(miner_id, miner_reward, miner_prev_reward))
+                    min_height = miner_to_height[miner_id][0]
+                    max_height = miner_to_height[miner_id][1]
                     balances.append(Balance(
                         miner_id=miner_id,
                         share=last_solved_share,
                         status='immature',
-                        balance=miner_reward - miner_prev_reward)
+                        balance=miner_reward - miner_prev_reward,
+                        min_height=min_height,
+                        max_height=max_height),
                     )
 
             # create and save balances to database
+            logger.info('bulk creating balances {}.'.format(len(balances)))
             Balance.objects.bulk_create(balances)
             logger.info('Balance created for all miners related to this round.')
 
@@ -208,35 +219,6 @@ class PPLNS(RewardAlgorithm):
         return prev_shares[prev_shares.count() - 1]
 
 
-def compute_hash_rate(by, to=timezone.now(), pk=None):
-    """
-    Function for calculate hash_rate between two time_stamp for a specific public_key or all
-    miners in that round.
-    :param by: timestamp for start period
-    :param to: timestamp for end period if `to` not exist set default now time.
-    :param pk: In the event that pk there is.
-    :return: a json of public_key and hash_rate them and total hash_rate
-    """
-    logger.info('computing hash for pk: {}'.format(pk))
-    if pk:
-        shares = Share.objects.values('miner__public_key').filter(miner__public_key=pk).filter(
-            Q(status='valid') | Q(status='solved'), created_at__range=(by, to)).annotate(Sum('difficulty'))
-    else:
-        shares = Share.objects.values('miner__public_key').filter(
-            Q(status='valid') | Q(status='solved'), created_at__range=(by, to)).annotate(Sum('difficulty'))
-
-    time = (to - by).total_seconds()
-    miners = dict()
-    total_hash_rate = 0
-    for share in shares:
-        miners[share['miner__public_key']] = dict()
-        miners[share['miner__public_key']]['hash_rate'] = int((share['difficulty__sum'] / time) + 1)
-        total_hash_rate = total_hash_rate + share['difficulty__sum'] if not pk else 0
-
-    miners.update({'total_hash_rate': int((total_hash_rate / time) + 1)})
-    return miners
-
-
 def node_request(api, header=None, data=None, params=None, request_type="get"):
     """
     Function for request to node
@@ -271,7 +253,8 @@ def node_request(api, header=None, data=None, params=None, request_type="get"):
         # check status code 2XX range is success
         return {
             "response": response_json,
-            "status": "success" if 200 <= response.status_code <= 299 else "External Error"
+            "status": "success" if 200 <= response.status_code <= 299 else
+            ("not-found" if response.status_code == 404 else "External Error")
         }
     except requests.exceptions.RequestException as e:
         logger.error("Can not resolve response from node")
@@ -359,14 +342,22 @@ class BlockDataIterable(object):
 def get_miner_payment_address(miner):
     """
     :param miner: a miner object
-    :return: selected_address associated with miner address if one selected
-             or the last used withdraw address. returns None if no withdraw address is available
+    :return: miner address associated with the given miner
     """
-    if miner.selected_address is not None:
-        return miner.selected_address.address
-
-    address = Address.objects.filter(address_miner=miner, category='withdraw').order_by('-last_used').first()
+    address = Address.objects.filter(address_miner=miner, category='miner').order_by('-last_used').first()
     if address is not None:
         return address.address
 
+    logger.error('miner {} does not have an address for withdrawal.'.format(miner.public_key))
     return None
+
+
+def verify_recaptcha(recaptcha_code):
+    url = "https://www.google.com/recaptcha/api/siteverify"
+    post_data = {
+        "secret": settings.RECAPTCHA,
+        "response": recaptcha_code
+    }
+    response = requests.post(url, data=post_data)
+    return response["success"]
+
