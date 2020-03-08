@@ -20,8 +20,9 @@ from django.conf import settings
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
     CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
-from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction, get_ergo_price
-from core.utils import RewardAlgorithm, compute_hash_rate, get_miner_payment_address
+from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction,\
+    get_ergo_price, periodic_verify_blocks
+from core.utils import RewardAlgorithm, get_miner_payment_address
 
 
 def random_string(length=10):
@@ -85,6 +86,7 @@ class ShareTestCase(TestCase):
                 'miner': '1',
                 'nonce': '1',
                 'status': 'solved',
+                'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': [],
                 'path': '-1',
@@ -104,6 +106,7 @@ class ShareTestCase(TestCase):
                 'nonce': '1',
                 "transaction_id": "this is a transaction id",
                 'status': 'solved',
+                'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': [],
                 'path': '-1',
@@ -150,7 +153,7 @@ class ShareTestCase(TestCase):
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
-    def test_solved_share(self):
+    def test_solved_share_without_pow(self):
         """
         test if a solution submitted must store in database
         :return:
@@ -169,6 +172,44 @@ class ShareTestCase(TestCase):
                 'difficulty': 123456}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
+        self.assertFalse(Share.objects.filter(share=share).exists())
+
+    def test_solved_share(self):
+        """
+        test if a solution submitted must store in database and save last ip in field ip
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {"share": share,
+                'miner': '1',
+                'nonce': '1',
+                "transaction_id": "this is a transaction id",
+                "block_height": 40404,
+                'status': 'solved',
+                'pow_identity': "test",
+                'parent_id': 'test',
+                'next_ids': ['test'],
+                'client_ip': '127.0.0.5',
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+
+        data = {"share": share + 'bhkk',
+                'miner': '1',
+                'nonce': '1',
+                "transaction_id": "gffdthis is a transaction id",
+                "block_height": 404054,
+                'status': 'solved',
+                'pow_identity': "test",
+                'parent_id': 'test',
+                'next_ids': ['test'],
+                'client_ip': '127.0.0.1',
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+
         self.assertTrue(Share.objects.filter(share=share).exists())
         self.assertTrue(Share.objects.filter(parent_id='test').exists())
         self.assertTrue(MinerIP.objects.filter(ip='127.0.0.1').exists())
@@ -187,6 +228,7 @@ class ShareTestCase(TestCase):
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
                 'status': 'solved',
+                'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': ['test'],
                 'client_ip': '127.0.0.1',
@@ -211,6 +253,7 @@ class ShareTestCase(TestCase):
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
                 'status': 'solved',
+                'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': ['test'],
                 'client_ip': '127.0.0.2',
@@ -219,37 +262,6 @@ class ShareTestCase(TestCase):
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertEqual(MinerIP.objects.filter(miner=miner).count(), 2)
-
-    def test_validate_unsolved_share_store_addresses(self):
-        """
-        test if a non-solution submitted share must store with None in transaction_id and block_height
-        3 address must be generated for miner
-        """
-        share = uuid.uuid4().hex
-        data = {'share': share,
-                'miner': '1',
-                'nonce': '1',
-                "transaction_id": "this is a transaction id",
-                "block_height": 40404,
-                'parent_id': 'test',
-                'next_ids': [],
-                'client_ip': '127.0.0.1',
-                'path': '-1',
-                'status': 'valid',
-                'difficulty': 123456}
-        data.update(self.addresses)
-        self.client.post('/shares/', data, format='json')
-        self.assertEqual(Share.objects.filter(share=share).count(), 1)
-        transaction = Share.objects.filter(share=share).first()
-        self.assertIsNone(transaction.transaction_id)
-        self.assertIsNone(transaction.block_height)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['miner_address'],
-                                                category='miner').count(), 1)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['lock_address'],
-                                                category='lock').count(), 1)
-        self.assertEqual(
-            Address.objects.filter(address_miner__public_key='1', address=self.addresses['withdraw_address'],
-                                   category='withdraw').count(), 1)
 
     def test_validate_unsolved_share_update_last_used(self):
         """
@@ -339,6 +351,10 @@ class ShareTestCase(TestCase):
 
     def tearDown(self):
         Address.objects.all().delete()
+        Miner.objects.all().delete()
+        Share.objects.all().delete()
+        Balance.objects.all().delete()
+        Configuration.objects.all().delete()
 
 
 class PropFunctionTest(TestCase):
@@ -512,6 +528,7 @@ class PropFunctionTest(TestCase):
         :return:
         """
         reward = RewardAlgorithm.get_instance().get_reward_to_share()
+        Configuration.objects.filter(key='FEE_FACTOR').delete()
         Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
         share = self.shares[34]
         for i in range(5):
@@ -566,13 +583,28 @@ class PropFunctionTest(TestCase):
         """
         Configuration.objects.all().delete()
         Balance.objects.all().delete()
-        # delete all miners objects. all related objects are deleted
-        for miner in self.miners:
-            miner.delete()
+        Share.objects.all().delete()
+        Miner.objects.all().delete()
 
 
 class UserApiTestCase(TestCase):
     def setUp(self) -> None:
+        Configuration.objects.create(key='MAX_WITHDRAW_THRESHOLD', value=str(int(100e9)))
+        Configuration.objects.create(key='MIN_WITHDRAW_THRESHOLD', value=str(int(1e9)))
+
+        # creating 10 miners
+        pks = [random_string().lower() for _ in range(10)]
+        for pk in pks:
+            Miner.objects.create(public_key=pk)
+
+        self.miners = list(Miner.objects.all())
+        # by default every miner has 80 erg balance
+        for miner in Miner.objects.all():
+            Balance.objects.create(miner=miner, balance=int(100e9), status="mature")
+            Balance.objects.create(miner=miner, balance=int(-20e9), status="withdraw")
+
+        self.balances = list(Balance.objects.all())
+
         self.factory = RequestFactory()
         User.objects.create_user(username='test', password='test')
 
@@ -580,7 +612,7 @@ class UserApiTestCase(TestCase):
         self.client.login(username='test', password='test')
 
         # Create two miner; abc and xyz
-        miners = [
+        cur_miners = [
             Miner.objects.create(public_key='abc', nick_name='ABC'),
             Miner.objects.create(public_key='xyz', nick_name='XYZ')
         ]
@@ -590,29 +622,229 @@ class UserApiTestCase(TestCase):
 
         # Create shares
         shares = [
-            Share.objects.create(share=random_string(), miner=miners[0], status="solved",
+            Share.objects.create(share=random_string(), miner=cur_miners[0], status="solved",
                                  created_at=self.now, difficulty=1000),
-            Share.objects.create(share=random_string(), miner=miners[0], status="valid",
-                                 created_at=self.now + timedelta(minutes=1), difficulty=1000),
-            Share.objects.create(share=random_string(), miner=miners[0], status="valid",
-                                 created_at=self.now + timedelta(minutes=2), difficulty=1000),
-            Share.objects.create(share=random_string(), miner=miners[0], status="invalid",
+            Share.objects.create(share=random_string(), miner=cur_miners[0], status="valid",
+                                 created_at=self.now + timedelta(minutes=1), difficulty=98761234),
+            Share.objects.create(share=random_string(), miner=cur_miners[0], status="valid",
+                                 created_at=self.now + timedelta(minutes=2), difficulty=54329876),
+            Share.objects.create(share=random_string(), miner=cur_miners[0], status="invalid",
                                  created_at=self.now + timedelta(minutes=3), difficulty=1000),
-            Share.objects.create(share=random_string(), miner=miners[1], status="valid",
-                                 created_at=self.now + timedelta(minutes=4), difficulty=1000),
-            Share.objects.create(share=random_string(), miner=miners[1], status="valid",
-                                 created_at=self.now + timedelta(minutes=5), difficulty=1000),
+            Share.objects.create(share=random_string(), miner=cur_miners[1], status="valid",
+                                 created_at=self.now + timedelta(minutes=4), difficulty=1234504321),
+            Share.objects.create(share=random_string(), miner=cur_miners[1], status="valid",
+                                 created_at=self.now + timedelta(minutes=5), difficulty=67890987),
         ]
 
         # Create balances
-        balances = [
-            Balance.objects.create(miner=miners[0], share=shares[0], balance=100, status="immature"),
-            Balance.objects.create(miner=miners[0], share=shares[1], balance=200, status="immature"),
-            Balance.objects.create(miner=miners[0], share=shares[2], balance=300, status="mature"),
-            Balance.objects.create(miner=miners[0], share=shares[3], balance=400, status="withdraw"),
-            Balance.objects.create(miner=miners[1], share=shares[4], balance=500, status="mature"),
-            Balance.objects.create(miner=miners[1], share=shares[5], balance=600, status="mature"),
-        ]
+        Balance.objects.create(miner=cur_miners[0], share=shares[0], balance=100, status="immature")
+        Balance.objects.create(miner=cur_miners[0], share=shares[1], balance=200, status="immature")
+        Balance.objects.create(miner=cur_miners[0], share=shares[2], balance=300, status="mature")
+        Balance.objects.create(miner=cur_miners[0], balance=-400, status="withdraw")
+        Balance.objects.create(miner=cur_miners[1], share=shares[4], balance=500, status="mature")
+        Balance.objects.create(miner=cur_miners[1], share=shares[5], balance=600, status="mature")
+
+    def get_threshold_url(self, pk):
+        return urljoin('/user/', pk) + '/'
+
+    def get_withdraw_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'withdraw') + '/'
+
+    def test_miner_not_specified_threshold_valid(self):
+        """
+        miner is not specified in request
+        """
+        data = {
+            'periodic_withdrawal_amount': int(20e9)
+        }
+
+        res = self.client.patch('/miner/', data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_miner_not_valid_threshold_valid(self):
+        """
+        miner specified but not valid
+        """
+        miner = self.miners[0]
+        data = {
+            'periodic_withdrawal_amount': int(20e9)
+        }
+
+        bef = miner.periodic_withdrawal_amount
+        res = self.client.patch('/miner/not_valid/', data, content_type='application/json')
+
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
+
+    def test_miner_valid_threshold_not_valid(self):
+        """
+        miner is specified and valid, threshold specified but not valid
+        """
+        miner = self.miners[0]
+        data = {
+            'periodic_withdrawal_amount': int(1000e9)
+        }
+
+        bef = miner.periodic_withdrawal_amount
+        res = self.client.patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
+
+    def test_miner_valid_threshold_valid(self):
+        """
+        miner is specified and valid, threshold specified and valid
+        """
+        miner = self.miners[0]
+        data = {
+            'periodic_withdrawal_amount': int(20e9)
+        }
+
+        res = Client().patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(int(20e9), Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
+
+    def test_miner_valid_threshold_type_not_valid(self):
+        """
+        miner is specified and valid, threshold type is not valid
+        """
+        miner = self.miners[0]
+        data = {
+            'periodic_withdrawal_amount': 'not_valid'
+        }
+
+        bef = miner.periodic_withdrawal_amount
+        res = self.client.patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_invalid_amount(self, mocked_generate_and_send_txs):
+        """
+        withdraw type is not valid
+        """
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': 'not_valid'
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_invalid_amount_smaller_than_fee(self, mocked_generate_and_send_txs):
+        """
+        withdraw type is not valid
+        """
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': TRANSACTION_FEE / 2
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_not_enough_balance(self, mocked_generate_and_send_txs):
+        """
+        not enough balance for the request
+        """
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': int(100e9)
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_not_enough_balance_because_of_pending(self, mocked_generate_and_send_txs):
+        """
+        not enough balance for the request
+        """
+        miner = self.miners[0]
+        Balance.objects.create(miner=miner, balance=int(-40e9), status="pending_withdrawal")
+        data = {
+            'withdraw_amount': int(50e9)
+        }
+
+        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
+
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_enough_balance_successful(self, mocked_generate_and_send_txs):
+        """
+        enough balance, successful
+        """
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': int(60e9)
+        }
+
+        res = Client().post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
+        mocked_generate_and_send_txs.delay.assert_has_calls(
+            [call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
+
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-60e9)).count(),
+                         1)
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_enough_balance_successful_with_pending(self, mocked_generate_and_send_txs):
+        """
+        enough balance, successful
+        """
+        miner = self.miners[0]
+        Balance.objects.create(miner=miner, balance=10, status="pending_withdrawal")
+        data = {
+            'withdraw_amount': int(60e9)
+        }
+
+        res = Client().post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
+        mocked_generate_and_send_txs.delay.assert_has_calls(
+            [call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
+
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-60e9)).count(),
+                         1)
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 2)
+
+    @patch('core.views.generate_and_send_transaction')
+    def test_withdraw_all_balance_successful(self, mocked_generate_and_send_txs):
+        """
+        enough balance, withdraw all the balance, successful
+        """
+        miner = self.miners[0]
+        data = {
+            'withdraw_amount': int(80e9)
+        }
+
+        res = Client().post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
+        mocked_generate_and_send_txs.delay.assert_has_calls(
+            [call([(miner.public_key, int(80e9), max_id)], subtract_fee=True)])
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-80e9)).count(),
+                         1)
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
 
     def test_get_all(self):
         """
@@ -627,52 +859,47 @@ class UserApiTestCase(TestCase):
             'round_valid_shares': 4,
             'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
-            'hash_rate': 1
+            "hash_rate": {
+                "current": 808604,
+                "avg": 16845
+            },
             'users': {
                 'abc': {
                     "round_valid_shares": 2,
-                    "round_invalid_shares": 0,
+                    "round_invalid_shares": 1,
                     "immature": 300,
                     "mature": 300,
                     "withdraw": 400,
-                    "hash_rate": 1
+                    "hash_rate": {
+                        "current": 85051,
+                        "avg": 1771
+                    },
                 },
                 'xyz': {
                     "round_valid_shares": 2,
-                    "round_invalid_shares": 1,
+                    "round_invalid_shares": 0,
                     "immature": 0,
                     "mature": 1100,
                     "withdraw": 0,
-                    "hash_rate": 1
+                    "hash_rate": {
+                        "current": 723552,
+                        "avg": 15074
+                    },
                 }
             }
         }
         """
+        for miner in self.miners:
+            miner.delete()
+
+        for balance in self.balances:
+            balance.delete()
+
         response = self.client.get('/user/').json()
-        self.assertDictEqual(response, {
-            'round_valid_shares': 4,
-            'round_invalid_shares': 1,
-            'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
-            'hash_rate': 1,
-            'users': {
-                'abc': {
-                    "round_valid_shares": 2,
-                    "round_invalid_shares": 1,
-                    "immature": 300,
-                    "mature": 300,
-                    "withdraw": 400,
-                    "hash_rate": 1
-                },
-                'xyz': {
-                    "round_valid_shares": 2,
-                    "round_invalid_shares": 0,
-                    "immature": 0,
-                    "mature": 1100,
-                    "withdraw": 0,
-                    "hash_rate": 1
-                }
-            }
-        })
+        with open("core/data_testing/user_api_all.json", "r") as read_file:
+            file = json.load(read_file)
+        file['timestamp'] = self.now.strftime("%Y-%m-%d %H:%M:%S")
+        self.assertDictEqual(response, file)
 
     def test_get_specified_pk(self):
         """
@@ -684,26 +911,13 @@ class UserApiTestCase(TestCase):
         * Content-Type is application/json
         * Content is :
         {
-            'round_shares': 4,
-            'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
-            'users': {
-                'abc': {
-                    "round_shares": 2,
-                    "immature": 300,
-                    "mature": 300,
-                    "withdraw": 400,
-                    "hash_rate": 1
-                }
-            }
-        }
-        """
-        content = self.client.get('/user/abc/')
-        response = content.json()
-        self.assertDictEqual(response, {
             'round_valid_shares': 4,
             'round_invalid_shares': 1,
             'timestamp': self.now.strftime('%Y-%m-%d %H:%M:%S'),
-            'hash_rate': 1,
+            "hash_rate": {
+                "current": 808604,
+                "avg": 16845
+            },
             'users': {
                 'abc': {
                     "round_valid_shares": 2,
@@ -711,10 +925,26 @@ class UserApiTestCase(TestCase):
                     "immature": 300,
                     "mature": 300,
                     "withdraw": 400,
-                    "hash_rate": 1
+                    "hash_rate": {
+                        "current": 85051,
+                        "avg": 1771
+                    }
                 }
             }
-        })
+        }
+        """
+        content = self.client.get('/user/abc/')
+        response = content.json()
+        with open("core/data_testing/user_api_specified_pk.json", "r") as read_file:
+            file = json.load(read_file)
+        file['timestamp'] = self.now.strftime("%Y-%m-%d %H:%M:%S")
+        self.assertDictEqual(response, file)
+
+    def tearDown(self) -> None:
+        Miner.objects.all().delete()
+        Balance.objects.all().delete()
+        Share.objects.all().delete()
+        Configuration.objects.all().delete()
 
 
 class ConfigurationAPITest(TestCase):
@@ -732,6 +962,9 @@ class ConfigurationAPITest(TestCase):
         setUp function for 'ConfigurationAPITest' class do nothing
         :return:
         """
+        User.objects.create_user(username='test', password='test')
+        self.client = APIClient()
+        self.client.login(username='test', password='test')
         pass
 
     def test_configuration_api_get_method_list(self):
@@ -783,6 +1016,23 @@ class ConfigurationAPITest(TestCase):
             self.assertIsNotNone(configuration)
             # check the value of the new created object
             self.assertEqual(configuration.value, '1')
+
+    def test_configuration_batch_create(self):
+        """
+        create or update configuration using batch configs
+        """
+        keys = [key for (key, temp) in CONFIGURATION_KEY_CHOICE]
+        Configuration.objects.create(key=keys[0], value="dummy_value")
+        batch = {}
+        for ind, key in enumerate(keys):
+            batch[key] = str(ind)
+
+        self.client.post('/conf/batch_create/', batch)
+
+        for ind, key in enumerate(keys):
+            self.assertEqual(Configuration.objects.filter(key=key).count(), 1)
+            conf = Configuration.objects.filter(key=key).first()
+            self.assertEqual(conf.value, str(ind))
 
     def test_configuration_api_post_method_update(self):
         """
@@ -879,12 +1129,13 @@ class PPLNSFunctionTest(TestCase):
         Configuration.objects.create(key='REWARD_FACTOR', value=str(65 / 67.5))
         self.PPLNS = RewardAlgorithm.get_instance().perform_logic
         # create miners lists
-        miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
+        miners = [Miner.objects.create(public_key=str(i)) for i in range(3)]
         # create shares list
         shares = [Share.objects.create(
             share=str(i),
             miner=miners[int(i / 2) % 3],
             status="solved" if i in [14, 44, 45] else "valid" if i % 2 == 0 else "invalid",
+            block_height=10,
             difficulty=1000
         ) for i in range(46)]
         # set create date for each shares to make them a sequence valid
@@ -920,6 +1171,23 @@ class PPLNSFunctionTest(TestCase):
         self.PPLNS(share)
         balances = self.get_share_balance(share)
         self.assertEqual(balances, {'0': int(24.375e9), '1': int(24.375e9), '2': int(16.25e9)})
+
+    def test_pplns_balance_height(self):
+        """
+        in this case we have 8 shares and pplns must work with this amount of shares
+        block_height of miner 1 share is 100, so balances created for this miner must match
+        """
+        share = self.shares[14]
+        for s in self.shares[:14]:
+            if s.status == 'valid' and s.miner.public_key == '0':
+                s.block_height = 100
+                s.save()
+                break
+        self.PPLNS(share)
+        balances = self.get_share_balance(share)
+        self.assertEqual(balances, {'0': int(24.375e9), '1': int(24.375e9), '2': int(16.25e9)})
+        self.assertEqual(Balance.objects.get(miner__public_key='0').min_height, 10)
+        self.assertEqual(Balance.objects.get(miner__public_key='0').max_height, 100)
 
     def test_pplns_with_more_than_n_shares(self):
         """
@@ -1042,58 +1310,6 @@ class PPLNSFunctionTest(TestCase):
         Configuration.objects.all().delete()
 
 
-class ComputeHashRateTest(TransactionTestCase):
-    """
-    For test function compute_hash_rate for calculate
-     hash_rate for one public_key or all public_key between two timestamp.
-
-    """
-    reset_sequences = True
-
-    def test_compute_hash_rate(self):
-        """
-        In this function create 2 miner and 4 share for calculate hash rate between two timestamp.
-        Pass two time_stamp to function compute_hash_rate and get hash_rate between this time_stamps that are
-         'valid' or 'solved'.
-        :return:
-        """
-        # Create objects for test
-
-        Miner.objects.create(nick_name="moein", public_key="12345678976543",
-                             created_at=datetime(2019, 12, 22, 8, 33, 45, 395985),
-                             updated_at=datetime(2019, 12, 22, 8, 33, 45, 395985))
-        Miner.objects.create(nick_name="amir", public_key="869675768342",
-                             created_at=datetime(2019, 12, 23, 8, 33, 45, 395985),
-                             updated_at=datetime(2019, 12, 23, 8, 33, 45, 395985))
-        share = Share.objects.create(share="12345", miner_id=1, block_height=23456,
-                                     transaction_id="234567uhgt678", status="solved", difficulty=4253524523)
-        share.created_at = "2019-12-22 14:18:57.395985+00"
-        share.updated_at = "2019-12-22 14:18:57.395985+00"
-        share.save()
-        share = Share.objects.create(share="234567", miner_id=1, block_height=23456,
-                                     transaction_id="234567uhgt678", status="valid", difficulty=4253524523)
-        share.created_at = "2019-12-22 18:18:57.376576+00"
-        share.updated_at = "2019-12-22 18:18:57.376576+00"
-        share.save()
-        share = Share.objects.create(share="8765678", miner_id=2, block_height=23456,
-                                     transaction_id="234567uhgt678", status="solved", difficulty=4253524523)
-        share.created_at = "2019-12-22 20:05:00.376576+00"
-        share.updated_at = "2019-12-22 20:05:00.376576+00"
-        share.save()
-        share = Share.objects.create(share="345678", miner_id=2, block_height=23456,
-                                     transaction_id="234567uhgt678", status="valid", difficulty=4253524523)
-        share.created_at = "2019-12-22 20:00:00.376576+00"
-        share.updated_at = "2019-12-22 20:00:00.376576+00"
-        share.save()
-        # Calculate hash rate
-        miners = compute_hash_rate(datetime(2019, 12, 22, 20, 5, 00, 370000, tzinfo=timezone.utc),
-                                   datetime(2019, 12, 24, 6, 39, 28, 887529, tzinfo=timezone.utc))
-
-        # check the function compute_hash_rate
-        self.assertEqual(miners, {'869675768342': {'hash_rate': 34174},
-                                  'total_hash_rate': 34174})
-
-
 class BlockTestCase(TestCase):
     """
     Test for different modes call api /blocks
@@ -1113,7 +1329,7 @@ class BlockTestCase(TestCase):
             def json(self):
                 return self.json_data
 
-        with open("core/data_mock_testing/test_get_blocks.json", "r") as read_file:
+        with open("core/data_testing/test_get_blocks.json", "r") as read_file:
             response = json.load(read_file)
         return MockResponse(response)
 
@@ -1198,6 +1414,11 @@ class BlockTestCase(TestCase):
             sort_by = [sort_by]
         self.assertEqual(sort_by, ["asc"])
 
+    def tearDown(self) -> None:
+        Configuration.objects.all().delete()
+        Miner.objects.all().delete()
+        Share.objects.all().delete()
+
 
 def mocked_node_request_transaction_generate_test(*args, **kwargs):
     """
@@ -1206,7 +1427,7 @@ def mocked_node_request_transaction_generate_test(*args, **kwargs):
     url = args[0]
 
     if url == 'wallet/boxes/unspent':
-        with open("core/data_mock_testing/test_boxes.json", "r") as read_file:
+        with open("core/data_testing/test_boxes.json", "r") as read_file:
             return {
                 'response': json.load(read_file),
                 'status': 'success'
@@ -1230,7 +1451,8 @@ def mocked_node_request_transaction_generate_test(*args, **kwargs):
             }
 
         return {
-            'status': 'success'
+            'status': 'success',
+            'response': 'test_id'
         }
 
     return {
@@ -1249,7 +1471,7 @@ class TransactionGenerateTestCase(TestCase):
     def setUp(self):
         """
         creates necessary configuration and objects and a default output list
-        :return:
+        also created balances must have default heights
         """
         # setting configuration
         Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='4')
@@ -1262,10 +1484,11 @@ class TransactionGenerateTestCase(TestCase):
         # create output for each miner
         self.outputs = [(pk, int((i + 1) * 1e10)) for i, pk in enumerate(pks)]
         self.pending_balances = [
-            Balance(miner=Miner.objects.get(public_key=x[0]), balance=-x[1], status="pending_withdrawal") for x in
+            Balance(miner=Miner.objects.get(public_key=x[0]), balance=-x[1], status="pending_withdrawal",
+                    min_height=1, max_height=100) for x in
             self.outputs]
         for pk, _ in self.outputs:
-            Address.objects.create(address_miner=Miner.objects.get(public_key=pk), category='withdraw', address=pk)
+            Address.objects.create(address_miner=Miner.objects.get(public_key=pk), category='miner', address=pk)
 
     def test_generate_three_transactions_max_num_output_4(self, mocked_request):
         """
@@ -1299,7 +1522,50 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs[2], request_type='post')
 
         for pk, value in self.outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw").count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw",
+                                                    tx_id='test_id', min_height=1, max_height=100).count(), 1)
+
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
+
+    def test_generate_three_transactions_check_height(self, mocked_request):
+        """
+        calling the function with all outputs and MAX_NUMBER_OF_OUTPUT = 4
+        must create 3 transactions and required balances
+        created withdraw balances must have valid heights
+        """
+        outputs = self.outputs[:]
+        for i, _ in enumerate(outputs):
+            self.pending_balances[i].min_height = i
+            self.pending_balances[i].max_height = 100 - i
+            self.pending_balances[i].save()
+            outputs[i] = (outputs[i][0], outputs[i][1], self.pending_balances[i].pk)
+
+        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+        generate_and_send_transaction(outputs)
+        chunks = [outputs[i:i + 4] for i in range(0, len(outputs), 4)]
+        reqs = [{
+            'requests': [
+                {
+                    'address': pk,
+                    'value': value
+                } for pk, value, _ in chunk
+            ],
+            'fee': TRANSACTION_FEE,
+            'inputsRaw': []
+        } for chunk in chunks]
+
+        reqs[0]['inputsRaw'] = ['a', 'b', 'c', 'd']
+        reqs[1]['inputsRaw'] = ['e', 'f', 'g']
+        reqs[2]['inputsRaw'] = ['h', 'i']
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs[0], request_type='post')
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs[1], request_type='post')
+        mocked_request.assert_any_call('wallet/transaction/send', data=reqs[2], request_type='post')
+
+        for i, out in enumerate(self.outputs):
+            pk = out[0]
+            value = out[1]
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw",
+                                                    tx_id='test_id', min_height=i, max_height=100 - i).count(), 1)
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
 
@@ -1331,7 +1597,8 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs[0], request_type='post')
 
         for pk, value, _ in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw").count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw",
+                                                    tx_id='test_id').count(), 1)
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
 
@@ -1362,7 +1629,8 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
 
         for pk, value, _ in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw").count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw",
+                                                    tx_id='test_id').count(), 1)
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
 
@@ -1373,8 +1641,8 @@ class TransactionGenerateTestCase(TestCase):
         """
         outputs = self.outputs[9:]
         for i, _ in enumerate(outputs):
-            self.pending_balances[i].save()
-            outputs[i] = (outputs[i][0], outputs[i][1], self.pending_balances[i].pk)
+            self.pending_balances[i + 9].save()
+            outputs[i] = (outputs[i][0], outputs[i][1], self.pending_balances[i + 9].pk)
 
         Configuration.objects.create(key='MAX_NUMBER_OF_OUTPUTS', value='10')
         TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
@@ -1393,7 +1661,8 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
 
         for pk, value, _ in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw").count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw",
+                                                    tx_id='test_id').count(), 1)
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
 
@@ -1415,7 +1684,8 @@ class TransactionGenerateTestCase(TestCase):
         generate_and_send_transaction(outputs)
 
         for pk, value, _ in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw").count(), 0)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="miner",
+                                                    tx_id='test_id').count(), 0)
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
 
@@ -1452,7 +1722,8 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs[0], request_type='post')
 
         for pk, value, _ in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw").count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw",
+                                                    tx_id='test_id').count(), 1)
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), len(self.outputs))
 
@@ -1487,7 +1758,8 @@ class TransactionGenerateTestCase(TestCase):
         mocked_request.assert_any_call('wallet/transaction/send', data=reqs, request_type='post')
 
         for pk, value, _ in outputs:
-            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw").count(), 1)
+            self.assertEqual(Balance.objects.filter(miner__public_key=pk, balance=-value, status="withdraw",
+                                                    tx_id='test_id').count(), 1)
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 4)
 
@@ -1498,6 +1770,8 @@ class TransactionGenerateTestCase(TestCase):
         """
         Configuration.objects.all().delete()
         Miner.objects.all().delete()
+        Share.objects.all().delete()
+        Balance.objects.all().delete()
         # delete all miners objects. all related objects are deleted
 
 
@@ -1525,8 +1799,8 @@ class PeriodicWithdrawalTestCase(TestCase):
 
         # by default all miners have balance of 80 erg
         for miner in Miner.objects.all():
-            Balance.objects.create(miner=miner, balance=int(100e9), status="mature")
-            Balance.objects.create(miner=miner, balance=int(-20e9), status="withdraw")
+            Balance.objects.create(miner=miner, balance=int(100e9), status="mature", min_height=1, max_height=10)
+            Balance.objects.create(miner=miner, balance=int(-20e9), status="withdraw", min_height=1, max_height=10)
 
         self.outputs = [(pk, int(80e9)) for pk in pks]
 
@@ -1562,8 +1836,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call([(miner.public_key, int(80e9), max_id + 1)])])
 
-        self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(),
-                         1)
+        self.assertEqual(Balance.objects.filter(miner=miner, balance=int(-80e9),
+                                                status="pending_withdrawal").count(), 1)
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
 
     def test_all_miner_below_default_threshold_two_explicit_threshold(self, mocked_generate_txs):
@@ -1579,8 +1853,9 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner2.save()
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
         periodic_withdrawal()
-        mocked_generate_txs.assert_has_calls([call(sorted([(miner1.public_key, int(80e9), max_id + 2),
-                                                    (miner2.public_key, int(80e9), max_id + 1)]))])
+        pks = sorted([m.public_key for m in [miner1, miner2]])
+        outputs = [(pk, int(80e9), max_id + 1 + i) for i, pk in enumerate(pks)]
+        mocked_generate_txs.assert_has_calls([call(outputs)])
         for miner in [miner1, miner2]:
             self.assertEqual(
                 Balance.objects.filter(miner=miner, balance=int(-80e9), status="pending_withdrawal").count(), 1)
@@ -1628,14 +1903,44 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner1 = self.miners[0]
         Balance.objects.create(miner=miner1, balance=int(-80e9), status="mature")
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        outputs = [(miner.public_key, int(110e9), max_id + 1 + i) for i, miner in enumerate(self.miners[1:])]
-        outputs = sorted(outputs)
+        pks = sorted([m.public_key for m in self.miners[1:]])
+        outputs = [(pk, int(110e9), max_id + 1 + i) for i, pk in enumerate(pks)]
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call(outputs)])
 
         for miner in self.miners[1:]:
             self.assertEqual(
-                Balance.objects.filter(miner=miner, balance=int(-110e9), status="pending_withdrawal").count(), 1)
+                Balance.objects.filter(miner=miner, balance=int(-110e9), status="pending_withdrawal",
+                                       min_height=1, max_height=10).count(), 1)
+        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), len(self.miners) - 1)
+
+    def test_all_miners_above_default_diff_height(self, mocked_generate_txs):
+        """
+        all miners balances are above default threshold, pending_withdrawal balances must have valid height
+        """
+        for i, miner in enumerate(self.miners[:5]):
+            Balance.objects.create(miner=miner, balance=int(30e9), status="mature", max_height=10 + i)
+
+        for i, miner in enumerate(self.miners[5:]):
+            Balance.objects.create(miner=miner, balance=int(30e9), status="mature", min_height=0, max_height=10 + i)
+        miner1 = self.miners[0]
+        Balance.objects.create(miner=miner1, balance=int(-80e9), status="mature")
+        max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
+        pks = sorted([m.public_key for m in self.miners[1:]])
+        outputs = [(pk, int(110e9), max_id + 1 + i) for i, pk in enumerate(pks)]
+        periodic_withdrawal()
+        mocked_generate_txs.assert_has_calls([call(outputs)])
+
+        for i, miner in enumerate(self.miners[1:5]):
+            self.assertEqual(
+                Balance.objects.filter(miner=miner, balance=int(-110e9), status="pending_withdrawal",
+                                       min_height=1, max_height=11 + i).count(), 1)
+
+        for i, miner in enumerate(self.miners[5:]):
+            self.assertEqual(
+                Balance.objects.filter(miner=miner, balance=int(-110e9), status="pending_withdrawal",
+                                       min_height=0, max_height=10 + i).count(), 1)
+
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), len(self.miners) - 1)
 
     def test_all_miners_above_default_but_one_no_balance(self, mocked_generate_txs):
@@ -1648,7 +1953,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         miner1 = self.miners[0]
         Balance.objects.filter(miner=miner1).delete()
         max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        outputs = [(miner.public_key, int(110e9), max_id + 1 + i) for i, miner in enumerate(self.miners[1:])]
+        pks = sorted([m.public_key for m in self.miners[1:]])
+        outputs = [(pk, int(110e9), max_id + 1 + i) for i, pk in enumerate(pks)]
         outputs = sorted(outputs)
         periodic_withdrawal()
         mocked_generate_txs.assert_has_calls([call(outputs)])
@@ -1674,246 +1980,8 @@ class PeriodicWithdrawalTestCase(TestCase):
         """
         Configuration.objects.all().delete()
         Miner.objects.all().delete()
-        # delete all miners objects. all related objects are deleted
-
-
-class MinerViewTestCase(TestCase):
-    """
-    Test class for MinerView
-    Balance statuses: mature, withdraw, pending_withdrawal
-    """
-
-    def setUp(self):
-        """
-        creates necessary configuration and objects and a default output list
-        :return:
-        """
-        self.client = Client()
-
-        # setting configuration
-        Configuration.objects.create(key='MAX_WITHDRAW_THRESHOLD', value=str(int(100e9)))
-        Configuration.objects.create(key='MIN_WITHDRAW_THRESHOLD', value=str(int(1e9)))
-
-        # creating 10 miners
-        pks = [random_string() for i in range(10)]
-        for pk in pks:
-            Miner.objects.create(public_key=pk)
-
-        self.miners = Miner.objects.all()
-        # by default every miner has 80 erg balance
-        for miner in Miner.objects.all():
-            Balance.objects.create(miner=miner, balance=int(100e9), status="mature")
-            Balance.objects.create(miner=miner, balance=int(-20e9), status="withdraw")
-
-    def get_threshold_url(self, pk):
-        return urljoin('/miner/', pk) + '/'
-
-    def get_withdraw_url(self, pk):
-        return urljoin(urljoin('/miner/', pk) + '/', 'withdraw') + '/'
-
-    def test_miner_not_specified_threshold_valid(self):
-        """
-        miner is not specified in request
-        """
-        data = {
-            'periodic_withdrawal_amount': int(20e9)
-        }
-
-        res = self.client.patch('/miner/', data, content_type='application/json')
-        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
-
-    def test_miner_not_valid_threshold_valid(self):
-        """
-        miner specified but not valid
-        """
-        miner = self.miners[0]
-        data = {
-            'periodic_withdrawal_amount': int(20e9)
-        }
-
-        bef = miner.periodic_withdrawal_amount
-        res = self.client.patch('/miner/not_valid/', data, content_type='application/json')
-
-        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
-
-    def test_miner_valid_threshold_not_valid(self):
-        """
-        miner is specified and valid, threshold specified but not valid
-        """
-        miner = self.miners[0]
-        data = {
-            'periodic_withdrawal_amount': int(1000e9)
-        }
-
-        bef = miner.periodic_withdrawal_amount
-        res = self.client.patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
-
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
-
-    def test_miner_valid_threshold_valid(self):
-        """
-        miner is specified and valid, threshold specified and valid
-        """
-        miner = self.miners[0]
-        data = {
-            'periodic_withdrawal_amount': int(20e9)
-        }
-
-        res = self.client.patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
-
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(int(20e9), Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
-
-    def test_miner_valid_threshold_type_not_valid(self):
-        """
-        miner is specified and valid, threshold type is not valid
-        """
-        miner = self.miners[0]
-        data = {
-            'periodic_withdrawal_amount': 'not_valid'
-        }
-
-        bef = miner.periodic_withdrawal_amount
-        res = self.client.patch(self.get_threshold_url(miner.public_key), data, content_type='application/json')
-
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(bef, Miner.objects.get(public_key=miner.public_key).periodic_withdrawal_amount)
-
-    @patch('core.views.generate_and_send_transaction')
-    def test_withdraw_invalid_amount(self, mocked_generate_and_send_txs):
-        """
-        withdraw type is not valid
-        """
-        miner = self.miners[0]
-        data = {
-            'withdraw_amount': 'not_valid'
-        }
-
-        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
-
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
-
-    @patch('core.views.generate_and_send_transaction')
-    def test_withdraw_invalid_amount_smaller_than_fee(self, mocked_generate_and_send_txs):
-        """
-        withdraw type is not valid
-        """
-        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
-        miner = self.miners[0]
-        data = {
-            'withdraw_amount': TRANSACTION_FEE / 2
-        }
-
-        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
-
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
-
-    @patch('core.views.generate_and_send_transaction')
-    def test_withdraw_not_enough_balance(self, mocked_generate_and_send_txs):
-        """
-        not enough balance for the request
-        """
-        miner = self.miners[0]
-        data = {
-            'withdraw_amount': int(100e9)
-        }
-
-        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
-
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 0)
-
-    @patch('core.views.generate_and_send_transaction')
-    def test_withdraw_not_enough_balance_because_of_pending(self, mocked_generate_and_send_txs):
-        """
-        not enough balance for the request
-        """
-        miner = self.miners[0]
-        Balance.objects.create(miner=miner, balance=int(-40e9), status="pending_withdrawal")
-        data = {
-            'withdraw_amount': int(50e9)
-        }
-
-        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertTrue(mocked_generate_and_send_txs.delay.not_called)
-
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
-
-    @patch('core.views.generate_and_send_transaction')
-    def test_withdraw_enough_balance_successful(self, mocked_generate_and_send_txs):
-        """
-        enough balance, successful
-        """
-        miner = self.miners[0]
-        data = {
-            'withdraw_amount': int(60e9)
-        }
-
-        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        mocked_generate_and_send_txs.delay.assert_has_calls(
-            [call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
-
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-60e9)).count(),
-                         1)
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
-
-    @patch('core.views.generate_and_send_transaction')
-    def test_withdraw_enough_balance_successful_with_pending(self, mocked_generate_and_send_txs):
-        """
-        enough balance, successful
-        """
-        miner = self.miners[0]
-        Balance.objects.create(miner=miner, balance=10, status="pending_withdrawal")
-        data = {
-            'withdraw_amount': int(60e9)
-        }
-
-        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        mocked_generate_and_send_txs.delay.assert_has_calls(
-            [call([(miner.public_key, int(60e9), max_id)], subtract_fee=True)])
-
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-60e9)).count(),
-                         1)
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 2)
-
-    @patch('core.views.generate_and_send_transaction')
-    def test_withdraw_all_balance_successful(self, mocked_generate_and_send_txs):
-        """
-        enough balance, withdraw all the balance, successful
-        """
-        miner = self.miners[0]
-        data = {
-            'withdraw_amount': int(80e9)
-        }
-
-        res = self.client.post(self.get_withdraw_url(miner.public_key), data, content_type='application/json')
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        max_id = Balance.objects.all().aggregate(Max('pk'))['pk__max']
-        mocked_generate_and_send_txs.delay.assert_has_calls(
-            [call([(miner.public_key, int(80e9), max_id)], subtract_fee=True)])
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal", miner=miner, balance=int(-80e9)).count(),
-                         1)
-        self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
-
-    def tearDown(self):
-        """
-        tearDown function to clean up objects created in setUp function
-        :return:
-        """
-        Configuration.objects.all().delete()
-        Miner.objects.all().delete()
+        Share.objects.all().delete()
+        Balance.objects.all().delete()
         # delete all miners objects. all related objects are deleted
 
 
@@ -1949,20 +2017,20 @@ class ImmatureToMatureTestCase(TestCase):
 
         if url == 'wallet/transactionById':
             params = kwargs['params']
-            num_confirmation = int(params['id'].split('_')[1])
+            num_confirmation = int(params['id'].split('_')[-1])
+            height = int(params['id'].split('_')[-2])
             return {
-                'response': {'numConfirmations': num_confirmation},
+                'response': {
+                    'numConfirmations': num_confirmation,
+                    'inclusionHeight': height
+                },
                 'status': 'success'
             }
 
         if 'chainslice' in url.lower():
-            params = kwargs['params']
-            # min_h = int(params['fromHeight'])
-            # max_h = int(params['toHeight'])
-            headers = json.loads(open('core/data_mock_testing/headers.json').read())
+            headers = json.loads(open('core/data_testing/headers.json').read())
             return {
                 'status': 'success',
-                # 'response': headers[min_h - 1:max_h]
                 'response': headers
             }
 
@@ -1994,34 +2062,39 @@ class ImmatureToMatureTestCase(TestCase):
 
         self.miners = Miner.objects.all()
         CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        default_hash = '0fd923ca5e7218c4ba3c3801c26a617ecdbfdaebb9c76ce2eca166e7855efbb8'
         for i in range(5):
             # not important shares
             num_confirmation = CONFIRMATION_LENGTH + 10
             block_height = self.CURRENT_HEIGHT - num_confirmation
-            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            tx_id = '_'.join([random_string(), str(block_height), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
-                                 block_height=block_height, status='valid', parent_id='1')
+                                 block_height=block_height, status='valid', parent_id='1',
+                                 pow_identity=default_hash)
 
             # confirmed shares
             num_confirmation = CONFIRMATION_LENGTH + 10
             block_height = self.CURRENT_HEIGHT - num_confirmation
-            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            tx_id = '_'.join([random_string(), str(block_height), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
-                                 block_height=block_height, status='solved', parent_id='1')
+                                 block_height=block_height, status='solved', parent_id='1',
+                                 pow_identity=default_hash)
 
             # confirmed just now
             num_confirmation = CONFIRMATION_LENGTH
             block_height = self.CURRENT_HEIGHT - num_confirmation
-            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            tx_id = '_'.join([random_string(), str(block_height), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
-                                 block_height=block_height, status='solved', parent_id='1')
+                                 block_height=block_height, status='solved', parent_id='1',
+                                 pow_identity=default_hash)
 
             # unconfirmed shares
             num_confirmation = CONFIRMATION_LENGTH - 10
             block_height = self.CURRENT_HEIGHT - num_confirmation
-            tx_id = '_'.join([random_string(), str(num_confirmation)])
+            tx_id = '_'.join([random_string(), str(block_height), str(num_confirmation)])
             Share.objects.create(miner=self.miners[0], transaction_id=tx_id, difficulty=1,
-                                 block_height=block_height, status='solved', parent_id='1')
+                                 block_height=block_height, status='solved', parent_id='1',
+                                 pow_identity=default_hash)
 
         # by default all shares have immature balances for each miner
         for share in Share.objects.all():
@@ -2031,7 +2104,8 @@ class ImmatureToMatureTestCase(TestCase):
                 Balance.objects.create(miner=miner, balance=int(-20e9), status='withdraw')
 
     @patch('core.tasks.node_request', side_effect=mocked_node_request)
-    def test_20_shares_possible_20_confirmed(self, mocked_node_request):
+    @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm_do_nothing)
+    def test_20_shares_possible_20_confirmed(self, mocked_node_request, mock):
         """
         20 shares have immature balances and their block_height is less than the threshold
         the same 20 shares are confirmed
@@ -2073,7 +2147,7 @@ class ImmatureToMatureTestCase(TestCase):
                                                status='solved').distinct()[:5]
         for share in cur_unconfirmed:
             num_confirmed = int(share.transaction_id.split('_')[-1])
-            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 1)])
+            share.transaction_id = '_'.join([random_string(), str(share.block_height), str(num_confirmed - 1)])
             share.save()
 
         cur_unconfirmed = [x.id for x in cur_unconfirmed]
@@ -2135,14 +2209,14 @@ class ImmatureToMatureTestCase(TestCase):
                                                status='solved').distinct()[:5]
         for share in cur_unconfirmed:
             num_confirmed = int(share.transaction_id.split('_')[-1])
-            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 1)])
+            share.transaction_id = '_'.join([random_string(), str(share.block_height), str(num_confirmed - 1)])
             share.save()
 
         cur_unconfirmed = [x.id for x in cur_unconfirmed]
 
         confirmed_shares_id = [x.id for x in Share.objects.filter(balance__status='immature',
                                                                   block_height__lte=(
-                                                                              current_height - CONFIRMATION_LENGTH),
+                                                                          current_height - CONFIRMATION_LENGTH),
                                                                   status='solved').distinct() if
                                x.id not in cur_unconfirmed]
 
@@ -2200,7 +2274,7 @@ class ImmatureToMatureTestCase(TestCase):
                                                status='solved').distinct()[:5]
         for share in cur_unconfirmed:
             num_confirmed = int(share.transaction_id.split('_')[-1])
-            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 1)])
+            share.transaction_id = '_'.join([random_string(), str(share.block_height), str(num_confirmed - 1)])
             share.save()
 
         cur_unconfirmed = [x.id for x in cur_unconfirmed]
@@ -2264,7 +2338,7 @@ class ImmatureToMatureTestCase(TestCase):
                                                status='solved').distinct()[:5]
         for share in cur_unconfirmed:
             num_confirmed = int(share.transaction_id.split('_')[-1])
-            share.transaction_id = '_'.join([random_string(), str(num_confirmed - 1)])
+            share.transaction_id = '_'.join([random_string(), str(share.block_height), str(num_confirmed - 1)])
             share.save()
 
         cur_unconfirmed = [x.id for x in cur_unconfirmed]
@@ -2312,6 +2386,120 @@ class ImmatureToMatureTestCase(TestCase):
                     self.assertEqual(balance.status, balances_to_status[balance.id])
 
     @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm_do_nothing)
+    def test_some_shares_incorrect_pow(self, mocked_node_request, logic):
+        """
+        20 shares have immature balances and their block_height is less than the threshold
+        15 of these shares are confirmed
+        some solved confirmed share has issues because their pow does not match with pow in the blockchain
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        cur_unconfirmed = Share.objects.filter(balance__status='immature',
+                                               block_height=(current_height - CONFIRMATION_LENGTH),
+                                               status='solved').distinct()[:5]
+        for share in cur_unconfirmed:
+            num_confirmed = int(share.transaction_id.split('_')[-1])
+            share.transaction_id = '_'.join([random_string(), str(share.block_height), str(num_confirmed - 1)])
+            share.save()
+
+        cur_unconfirmed = [x.id for x in cur_unconfirmed]
+
+        confirmed_shares = [x.id for x in Share.objects.filter(balance__status='immature',
+                                                               block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                                               status='solved').distinct() if
+                            x.id not in cur_unconfirmed]
+        conf = Share.objects.get(id=confirmed_shares[0])
+        conf.pow_identity = 'wrong_hash'
+        conf.save()
+        conf_balances = [b.id for b in Balance.objects.filter(share=conf, status='immature')]
+
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        total_bal_count = Balance.objects.all().count()
+        immature_to_mature()
+        for id in conf_balances:
+            b = Balance.objects.get(id=id)
+            self.assertEqual(Balance.objects.filter(miner=b.miner, status='mature',
+                                                    balance=-b.balance, share=conf).count(), 1)
+
+        self.assertEqual(Balance.objects.all().count(), total_bal_count + len(conf_balances))
+
+        conf = Share.objects.get(id=conf.id)
+        self.assertTrue(conf.is_orphaned)
+
+        for balance_id in balances_to_status.keys():
+            balance = Balance.objects.get(id=balance_id)
+            if balance.share is None or balance.share.id not in confirmed_shares:
+                self.assertEqual(balance.status, balances_to_status[balance.id])
+
+            else:
+                if balances_to_status[balance.id] == "immature":
+                    self.assertEqual(balance.status, "mature")
+
+                else:
+                    self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm_do_nothing)
+    def test_some_shares_incorrect_tx_height(self, mocked_node_request, logic):
+        """
+        20 shares have immature balances and their block_height is less than the threshold
+        15 of these shares are confirmed
+        some solved confirmed share has issues because their tx height does not match with share height
+        """
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        cur_unconfirmed = Share.objects.filter(balance__status='immature',
+                                               block_height=(current_height - CONFIRMATION_LENGTH),
+                                               status='solved').distinct()[:5]
+        for share in cur_unconfirmed:
+            num_confirmed = int(share.transaction_id.split('_')[-1])
+            share.transaction_id = '_'.join([random_string(), str(share.block_height), str(num_confirmed - 1)])
+            share.save()
+
+        cur_unconfirmed = [x.id for x in cur_unconfirmed]
+
+        confirmed_shares = [x.id for x in Share.objects.filter(balance__status='immature',
+                                                               block_height__lte=(current_height - CONFIRMATION_LENGTH),
+                                                               status='solved').distinct() if
+                            x.id not in cur_unconfirmed]
+        conf = Share.objects.get(id=confirmed_shares[0])
+        conf.block_height = 10
+        conf.save()
+        conf_balances = [b.id for b in Balance.objects.filter(share=conf, status='immature')]
+
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        total_bal_count = Balance.objects.all().count()
+        immature_to_mature()
+        for id in conf_balances:
+            b = Balance.objects.get(id=id)
+            self.assertEqual(Balance.objects.filter(miner=b.miner, status='mature',
+                                                    balance=-b.balance, share=conf).count(), 1)
+
+        self.assertEqual(Balance.objects.all().count(), total_bal_count + len(conf_balances))
+
+        conf = Share.objects.get(id=conf.id)
+        self.assertTrue(conf.is_orphaned)
+
+        for balance_id in balances_to_status.keys():
+            balance = Balance.objects.get(id=balance_id)
+            if balance.share is None or balance.share.id not in confirmed_shares:
+                self.assertEqual(balance.status, balances_to_status[balance.id])
+
+            else:
+                if balances_to_status[balance.id] == "immature":
+                    self.assertEqual(balance.status, "mature")
+
+                else:
+                    self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
     def test_20_shares_possible_0_confirmed(self, mocked_node_request):
         """
         20 shares have immature balances and their block_height is less than the threshold
@@ -2325,6 +2513,7 @@ class ImmatureToMatureTestCase(TestCase):
         for share in cur_unconfirmed:
             num_confirmed = int(share.transaction_id.split('_')[-1])
             share.transaction_id = '_'.join([random_string(), str(num_confirmed - 100)])
+            share.block_height += 100
             share.save()
 
         balances_to_status = {
@@ -2389,11 +2578,11 @@ class AggregateTestCase(TestCase):
         """
         date = '2020-01-27 12:19:46.196633'
         self.shares_detail_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
-                                               settings.SHARE_DETAIL_FOLDER, date) + '.json'
+                                               settings.SHARE_DETAIL_FOLDER, date) + '.csv'
         self.shares_aggregate_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
-                                                  settings.SHARE_AGGREGATE_FOLDER, date) + '.json'
+                                                  settings.SHARE_AGGREGATE_FOLDER, date) + '.csv'
         self.balance_detail_file = os.path.join(settings.AGGREGATE_ROOT_FOLDER,
-                                                settings.BALANCE_DETAIL_FOLDER, date) + '.json'
+                                                settings.BALANCE_DETAIL_FOLDER, date) + '.csv'
 
         # deleting files
         for file in [self.shares_aggregate_file, self.shares_detail_file, self.balance_detail_file]:
@@ -2433,12 +2622,10 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        share_detail_content = []
 
-        for solved in self.solved[:-settings.KEEP_SHARES_WITH_DETAIL_NUM]:
-            for share in Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)):
-                share_detail_content.append(str(ShareSerializer(share).data))
-
+        share = self.solved[:-settings.KEEP_SHARES_WITH_DETAIL_NUM][-1]
+        shares = Share.objects.filter(status__in=['valid', 'invalid', 'repetitious'], created_at__lte=share.created_at)
+        share_detail_content = shares.to_csv().decode('utf-8')
         aggregate()
 
         # all shares in last 5 rounds must remain with details
@@ -2471,19 +2658,16 @@ class AggregateTestCase(TestCase):
             self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
             self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
 
-        share_detail_content = '\n'.join(sorted(share_detail_content))
-
         self.assertTrue(os.path.exists(self.shares_detail_file))
         with open(self.shares_detail_file, 'r') as file:
-            content = file.read().rstrip()
-            content = '\n'.join(sorted(content.split('\n')))
-            self.assertEqual(share_detail_content, content)
+            content = sorted(file.read().split('\n'))
+            self.assertEqual(sorted(share_detail_content.split('\n')), content)
 
         self.assertTrue(os.path.exists(self.shares_aggregate_file))
         with open(self.shares_aggregate_file, 'r') as file:
             content = file.read().rstrip()
             content = content.split('\n')
-            self.assertEqual(len(content), 10)
+            self.assertEqual(len(content), 11)
 
     def test_share_6_with_detail_other_aggregated(self, mocked_time):
         """
@@ -2491,11 +2675,9 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        share_aggregate_content = []
-        share_detail_content = []
 
-        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
-            share_detail_content.append(str(ShareSerializer(share).data))
+        shares = Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1))
+        share_detail_content = shares.to_csv().decode('utf-8')
 
         for solved in self.solved[:4]:
             solved.is_aggregated = True
@@ -2508,10 +2690,8 @@ class AggregateTestCase(TestCase):
                 else:
                     AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
                                                   invalid_num=1, repetitious_num=1, difficulty_sum=30)
-
-        for solved in self.solved[:2]:
-            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
-                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
+        share_aggregate_content = AggregateShare.objects.filter(solved_share__in=self.solved[:2]).\
+            to_csv().decode('utf-8')
 
         aggregate()
 
@@ -2536,16 +2716,12 @@ class AggregateTestCase(TestCase):
             self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
             self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
 
-        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
-        share_detail_content = '\n'.join(sorted(share_detail_content))
-
         for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
                                            (self.shares_detail_file, share_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def test_share_6_with_detail_other_aggregated_some_miners_not_exist_in_round(self, mocked_time):
         """
@@ -2554,15 +2730,12 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        share_aggregate_content = []
-        share_detail_content = []
-
         # first miner is not present in 5th round, so nothing must be aggregated for him
         Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1),
                              miner=Miner.objects.all()[0]).delete()
 
-        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
-            share_detail_content.append(str(ShareSerializer(share).data))
+        share_detail_content = Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)).\
+            to_csv().decode('utf-8')
 
         for solved in self.solved[:4]:
             solved.is_aggregated = True
@@ -2576,9 +2749,8 @@ class AggregateTestCase(TestCase):
                     AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
                                                   invalid_num=1, repetitious_num=1, difficulty_sum=30)
 
-        for solved in self.solved[:2]:
-            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
-                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
+        share_aggregate_content = AggregateShare.objects.filter(solved_share__in=self.solved[:2]). \
+            to_csv().decode('utf-8')
 
         aggregate()
 
@@ -2609,83 +2781,12 @@ class AggregateTestCase(TestCase):
             self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
             self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
 
-        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
-        share_detail_content = '\n'.join(sorted(share_detail_content))
-
         for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
                                            (self.shares_detail_file, share_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
-
-    def test_share_6_with_detail_other_aggregated_files_not_empty(self, mocked_time):
-        """
-        some aggregated must be removed, some details must be aggregated
-        balance, shares_detail and shares_aggregate files are not empty, must be appended
-        """
-        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                         '%Y-%m-%d %H:%M:%S.%f')
-        share_aggregate_content = ['just', 'something', 'random']
-        share_detail_content = ['just', 'something', 'random']
-
-        for file in [self.shares_aggregate_file, self.shares_detail_file]:
-            with open(file, 'w') as cur:
-                cur.write('just\nsomething\nrandom\n')
-
-        for share in Share.objects.filter(created_at=self.solved[4].created_at - timedelta(seconds=1)):
-            share_detail_content.append(str(ShareSerializer(share).data))
-
-        for solved in self.solved[:4]:
-            solved.is_aggregated = True
-            solved.save()
-            Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).delete()
-            for miner in Miner.objects.all():
-                if miner.public_key in ['0', '1', '2']:
-                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=2,
-                                                  invalid_num=2, repetitious_num=2, difficulty_sum=60)
-                else:
-                    AggregateShare.objects.create(miner=miner, solved_share=solved, valid_num=1,
-                                                  invalid_num=1, repetitious_num=1, difficulty_sum=30)
-
-        for solved in self.solved[:2]:
-            for share_aggregate in AggregateShare.objects.filter(solved_share=solved):
-                share_aggregate_content.append(str(AggregateShareSerializer(share_aggregate).data))
-
-        aggregate()
-
-        # all shares in last 5 rounds must remain with details
-        for solved in self.solved[-5:]:
-            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, False)
-            # the solved share must remain
-            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
-            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 24)
-            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
-
-        # 5th round must remain aggregated
-        for solved in self.solved[2:5]:
-            self.assertEqual(Share.objects.get(id=solved.id).is_aggregated, True)
-            for miner in Miner.objects.all():
-                self.assertEqual(AggregateShare.objects.filter(miner=miner, solved_share=solved).count(), 1)
-
-        # 2 aggregated rounds must be removed
-        for solved in self.solved[:2]:
-            # the solved share must remain
-            self.assertEqual(Share.objects.filter(id=solved.id).count(), 1)
-            self.assertEqual(Share.objects.filter(created_at=solved.created_at - timedelta(seconds=1)).count(), 0)
-            self.assertEqual(AggregateShare.objects.filter(solved_share=solved).count(), 0)
-
-        share_aggregate_content = '\n'.join(sorted(share_aggregate_content))
-        share_detail_content = '\n'.join(sorted(share_detail_content))
-
-        self.assertTrue(os.path.exists(self.shares_aggregate_file))
-        for filename, expected_content in [(self.shares_aggregate_file, share_aggregate_content),
-                                           (self.shares_detail_file, share_detail_content)]:
-            with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def test_share_5_detail_3_aggregated(self, mocked_time):
         """
@@ -2736,10 +2837,9 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        balance_detail_content = []
-
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
+        balances = Balance.objects.filter(created_at__lte=self.solved[1].created_at)
+        balance_detail_content = balances.to_csv()
+        balance_detail_content = balance_detail_content.decode('utf-8')
 
         aggregate()
 
@@ -2754,52 +2854,11 @@ class AggregateTestCase(TestCase):
                 self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status='withdraw',
                                                         balance=int(-10e9)).count(), 1)
 
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r')as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
-
-    def test_balance_all_with_detail_file_not_empty(self, mocked_time):
-        """
-        all balances are with details
-        balance detail file is already present with some values
-        should be appended to the end of the file
-        """
-        mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
-                                                         '%Y-%m-%d %H:%M:%S.%f')
-        balance_detail_content = ['just', 'something', 'random']
-
-        with open(self.balance_detail_file, 'w') as file:
-            file.write('just\nsomething\nrandom\n')
-
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
-
-        aggregate()
-
-        for miner in Miner.objects.all():
-            self.assertEqual(Balance.objects.filter(miner=miner, status="mature", balance=int(60e9)).count(), 1)
-            self.assertEqual(Balance.objects.filter(miner=miner, status="withdraw", balance=int(-20e9)).count(), 1)
-
-        for solved in self.solved[2:]:
-            for miner in Miner.objects.all():
-                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="mature",
-                                                        balance=int(30e9)).count(), 1)
-                self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="withdraw",
-                                                        balance=int(-10e9)).count(), 1)
-
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
-        for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
-            self.assertTrue(os.path.exists(filename))
-            with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def test_balance_all_with_detail_some_without_share(self, mocked_time):
         """
@@ -2808,15 +2867,14 @@ class AggregateTestCase(TestCase):
         """
         mocked_time.now.return_value = datetime.strptime('2020-01-27 12:19:46.196633',
                                                          '%Y-%m-%d %H:%M:%S.%f')
-        balance_detail_content = []
 
         b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(100e9), status="mature")
         Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
         b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(-50e9), status="withdraw")
         Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
 
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at):
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
+        balance_detail_content = Balance.objects.filter(created_at__lte=self.solved[1].created_at).\
+            to_csv().decode('utf-8')
 
         aggregate()
 
@@ -2836,14 +2894,11 @@ class AggregateTestCase(TestCase):
                 self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="withdraw",
                                                         balance=int(-10e9)).count(), 1)
 
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     @override_settings(KEEP_BALANCE_WITH_DETAIL_NUM=0)
     def test_balance_all_with_detail_no_detail_remain(self, mocked_time):
@@ -2855,8 +2910,7 @@ class AggregateTestCase(TestCase):
         balance_detail_content = []
         settings.KEEP_BALANCE_WITH_DETAIL_NUM = 0
 
-        for balance in Balance.objects.all():
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
+        balance_detail_content = Balance.objects.all().to_csv().decode('utf-8')
 
         aggregate()
 
@@ -2871,14 +2925,11 @@ class AggregateTestCase(TestCase):
                 self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="withdraw",
                                                         balance=int(-10e9)).count(), 0)
 
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def test_balance_all_with_detail_with_immature_and_pending(self, mocked_time):
         """
@@ -2898,10 +2949,8 @@ class AggregateTestCase(TestCase):
         b = Balance.objects.create(miner=Miner.objects.all()[0], balance=int(-50e9), status="pending_withdrawal")
         Balance.objects.filter(id=b.id).update(created_at=self.solved[1].created_at - timedelta(seconds=1))
 
-        for balance in Balance.objects.filter(created_at__lte=self.solved[1].created_at,
-                                              status__in=["mature", "withdraw"]):
-            balance_detail_content.append(str(BalanceSerializer(balance).data))
-
+        balance_detail_content = Balance.objects.filter(created_at__lte=self.solved[1].created_at,
+                                              status__in=["mature", "withdraw"]).to_csv().decode('utf-8')
         aggregate()
 
         self.assertEqual(Balance.objects.filter(status="pending_withdrawal").count(), 1)
@@ -2918,19 +2967,17 @@ class AggregateTestCase(TestCase):
                 self.assertEqual(Balance.objects.filter(share=solved, miner=miner, status="withdraw",
                                                         balance=int(-10e9)).count(), 1)
 
-        balance_detail_content = '\n'.join(sorted(balance_detail_content))
-
         for filename, expected_content in [(self.balance_detail_file, balance_detail_content)]:
             self.assertTrue(os.path.exists(filename))
             with open(filename, 'r') as file:
-                content = file.read().rstrip()
-                content = '\n'.join(sorted(content.split('\n')))
-                self.assertEqual(expected_content, content)
+                content = sorted(file.read().split('\n'))
+                self.assertEqual(sorted(expected_content.split('\n')), content)
 
     def tearDown(self):
-        # restoring setting parameters
+        Configuration.objects.all().delete()
         Miner.objects.all().delete()
         Share.objects.all().delete()
+        Balance.objects.all().delete()
         AggregateShare.objects.all().delete()
         for file in [self.balance_detail_file, self.shares_detail_file, self.shares_aggregate_file]:
             if os.path.exists(file):
@@ -2999,14 +3046,19 @@ class GetMinerAddressTestCase(TestCase):
         self.assertEqual(address, selected.address)
 
     def tearDown(self):
+        Configuration.objects.all().delete()
         Miner.objects.all().delete()
         Address.objects.all().delete()
+        Share.objects.all().delete()
+        AggregateShare.objects.all().delete()
+        Balance.objects.all().delete()
 
 
 class GetMinerAddressTestCase(TestCase):
     """
     Test class for ergo price creation and get
     """
+
     def mock_get_price(*args, **kwargs):
         return {'ergo': {'btc': 10.1, 'usd': 11.1}}
 
@@ -3033,4 +3085,188 @@ class GetMinerAddressTestCase(TestCase):
         self.assertEqual(ExtraInfo.objects.filter(key='ERGO_PRICE_USD', value='11.1').count(), 1)
 
     def tearDown(self):
+        Configuration.objects.all().delete()
         ExtraInfo.objects.all().delete()
+
+
+class PeriodicVerifyBlocks(TestCase):
+    """
+    For test task periodic verify blocks
+    """
+    CURRENT_HEIGHT = 11
+
+    def mocked_node_request(*args, **kwargs):
+        """
+        mock requests with method post
+        """
+        url = args[0]
+
+        if url == 'info':
+            return {
+                'response': {'fullHeight': PeriodicVerifyBlocks.CURRENT_HEIGHT},
+                'status': 'success'
+            }
+
+        if 'wallet/transactionById' in url:
+            params = kwargs['params']['id']
+            if params == '6':
+                return {
+                    'response': ['Error'],
+                    'status': 'External Error'
+                }
+            if params == '7':
+                return {
+                    'status': 'not-found'
+                }
+            if params == '8':
+                return {
+                    'response': [{'inclusionHeight': int(params) + 1}],
+                    'status': 'success'
+                }
+            return {
+                'response': [{'inclusionHeight': int(params)}],
+                'status': 'success'
+            }
+
+        return {
+            'response': None,
+            'status': 'error'
+        }
+
+    def setUp(self):
+        """
+        Create 1 miner and 10 shares with specific transaction_id and block_height
+        :return:
+        """
+        miner = Miner.objects.create(public_key='1')
+        for x in range(10):
+            Share.objects.create(miner=miner, transaction_id=str(x), difficulty=1, block_height=str(x),
+                                 status='solved', parent_id='1')
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    def test_verify_blocks(self, mock_node):
+        """
+        run task verify blocks and check flag transaction_valid expect transaction_valid for shares with
+        transaction_id 8, 7 is False because height not true and not-found transaction in block-chain,
+         transaction_id 6 flag is None because node don't send response for this share,
+          transaction_id 9 is None because not in range check transaction.
+        :return:
+        """
+        periodic_verify_blocks()
+        shares = Share.objects.all().order_by('transaction_id')
+        self.assertIsNone(shares[9].transaction_valid)
+        self.assertFalse(shares[8].transaction_valid)
+        self.assertFalse(shares[7].transaction_valid)
+        self.assertIsNone(shares[6].transaction_valid)
+        for x in range(5, -1, -1):
+            self.assertTrue(shares[x].transaction_valid)
+
+    def tearDown(self):
+        """
+        tearDown function to clean up objects created in setUp function
+        :return:
+        """
+        Configuration.objects.all().delete()
+        Miner.objects.all().delete()
+        Share.objects.all().delete()
+        Balance.objects.all().delete()
+
+
+class AdministratorUserTestCase(TestCase):
+    """
+    test route administrator/users
+    result of every miner similar this
+    {
+        "user": public_key,
+        "hash_rate": int,
+        "valid_shares": int,
+        "invalid_shares": int,
+        "last_ip": last ip of miner,
+        "status": active or inactive
+    }
+    """
+    def setUp(self):
+        """
+        Create 4 miners and set miner ip for them so call 10 shares for every miners and set authenticate.
+        :return:
+        """
+        for i in range(1, 5):
+            miner = Miner.objects.create(public_key=i, ip='127.0.0.{}'.format(i))
+
+        miner = Miner.objects.all()
+
+        for x in range(10):
+            Share.objects.create(miner=miner[0], transaction_id=str(x), difficulty=10000, block_height=str(x),
+                                 status='solved', parent_id='1')
+            Share.objects.create(miner=miner[1], transaction_id=str(x), difficulty=10000, block_height=str(x),
+                                 status='invalid', parent_id='1')
+            Share.objects.create(miner=miner[2], transaction_id=str(x), difficulty=10000, block_height=str(x),
+                                 status='repetitious', parent_id='1')
+            Share.objects.create(miner=miner[3], transaction_id=str(x), difficulty=20000, block_height=str(x),
+                                 status='valid', parent_id='1')
+        # set session authenticate
+        self.factory = RequestFactory()
+        User.objects.create_user(username='test', password='test')
+        self.client = APIClient()
+        self.client.login(username='test', password='test')
+
+    def test_call_api_normal(self):
+        """
+        We expect with call route /administrator/users/ get all miners.
+        """
+        # Call route /administrator/users/
+        response = self.client.get('/administrator/users/').json()
+        # Expected output
+        with open("core/data_testing/administrator_user_normal.json", "r") as read_file:
+            file = json.load(read_file)
+
+        self.assertEqual(response, file)
+
+    def test_call_api_query_1(self):
+        """
+        We expect with call route /administrator/users/ get miners that has last_ip with range 127.0.0.2 - 127.0.0.10
+         and sorted according to user.
+        """
+        # Call route /administrator/users/
+        data = {
+            'last_ip_min': '127.0.0.2',
+            'last_ip_max': '127.0.0.10',
+            'ordering': '-last_ip'
+        }
+        response = self.client.get('/administrator/users/', data, content_type='application/json').json()
+        # Expected output
+        with open("core/data_testing/administrator_user_query_1.json", "r") as read_file:
+            file = json.load(read_file)
+
+        self.assertEqual(response, file)
+
+    def test_call_api_query_2(self):
+        """
+        We expect with call route /administrator/users/ get miners that has hash_rate with range 50 - 150
+         and lat_ip bigger than 127.0.0.2
+        """
+        # Call route /administrator/users/
+        data = {
+            'hash_rate_min': '50',
+            'hash_rate_max': '150',
+            'last_ip_min': '127.0.0.2'
+        }
+        response = self.client.get('/administrator/users/', data, content_type='application/json').json()
+        # Expected output
+        with open("core/data_testing/administrator_user_query_2.json", "r") as read_file:
+            file = json.load(read_file)
+
+        self.assertEqual(response, file)
+
+    def test_call_api_query_3(self):
+        """
+        We expect with call route /administrator/users/ get exception because ip is invalid
+        """
+        # Call route /administrator/users/
+        data = {
+            'last_ip_max': '127.0.0.1116'
+        }
+        response = self.client.get('/administrator/users/', data, content_type='application/json').json()
+
+        self.assertEqual(response, ['Filter range for last_ip is invalid.'])
+

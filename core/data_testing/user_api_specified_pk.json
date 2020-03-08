@@ -1,0 +1,21 @@
+{
+  "round_valid_shares": 4,
+  "round_invalid_shares": 1,
+  "hash_rate": {
+    "current": 808604,
+    "avg": 16845
+  },
+  "users": {
+    "abc": {
+      "round_valid_shares": 2,
+      "round_invalid_shares": 1,
+      "immature": 300,
+      "mature": 300,
+      "withdraw": -400,
+      "hash_rate": {
+        "current": 85051,
+        "avg": 1771
+      }
+    }
+  }
+}
