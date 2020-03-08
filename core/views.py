@@ -23,7 +23,7 @@ from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
     LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT, \
-    TOTAL_PERIOD_COUNT_SHARE
+    TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
 from core.authentication import CustomPermission
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo
@@ -31,6 +31,11 @@ from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer
     ErgoAuthTokenSerializer
 from core.tasks import generate_and_send_transaction
 from core.utils import RewardAlgorithm, BlockDataIterable
+from django_otp.plugins.otp_totp.models import TOTPDevice
+from django_otp.util import random_hex
+import qrcode
+import base64
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
@@ -815,3 +820,50 @@ class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.Lis
         token, created = Token.objects.get_or_create(user=user)
         headers = self.get_success_headers(serializer.data)
         return Response({'token': token.key}, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.UpdateModelMixin):
+    # serializer_class = TOTPDeviceSerializer
+    queryset = TOTPDevice.objects.all()
+    # For session authentication
+    authentication_classes = [TokenAuthentication]
+    # For token authentication
+    permission_classes = (IsAuthenticated,)
+
+    @staticmethod
+    def get_qr_code(device_url):
+        """
+        Create QR code base64 from otp-url
+        """
+        qr = qrcode.QRCode(version=QR_CONFIG.get('QR_VERSION'), error_correction=qrcode.constants.ERROR_CORRECT_L,
+                           box_size=QR_CONFIG.get('QR_BOX_SIZE'), border=QR_CONFIG.get('QR_BORDER'))
+        qr.add_data(device_url)
+        qr.make(fit=True)
+        img = qr.make_image()
+        output = BytesIO()
+        img.save(output)
+        qr_data = output.getvalue()
+        output.close()
+        return base64.b64encode(qr_data).decode('ascii')
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create or reload new device for user.
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        device_config = DEVICE_CONFIG.copy()
+        device_config.update({
+            'user': request.user,
+            'name': request.user.username,
+            'confirmed': True
+        })
+        # Create new device totp if not exist
+        device, flag = TOTPDevice.objects.update_or_create(**device_config)
+        # if device for this user exist generate new secret key and update device
+        if not flag:
+            device.key = random_hex(20)
+            device.save()
+        return Response({'qrcode': self.get_qr_code(device.config_url)}, status=status.HTTP_201_CREATED)
