@@ -12,4 +12,4 @@ django-postgres-copy
 django-filter==2.2
 django-otp==0.8.1
 qrcode==6.1
-
+Pillow==7.0.0

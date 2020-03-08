@@ -3272,7 +3272,8 @@ class AdministratorUserTestCase(TestCase):
         self.assertEqual(response, ['Filter range for last_ip is invalid.'])
 
 
-class LoginTestCase(TestCase):
+class LoginTestCase(TransactionTestCase):
+    reset_sequences = True
 
     def mocked_verify_recaptcha(self):
         return {'success': True}
@@ -3283,14 +3284,6 @@ class LoginTestCase(TestCase):
         if args[0] == '4321':
             return False
 
-    def setUp(self):
-        """
-        Create a user.
-        :return:
-        """
-        # Create User
-        self.factory = RequestFactory()
-        User.objects.create_user(username='test', password='test')
 
     @patch('django_otp.plugins.otp_totp.models.TOTPDevice.verify_token', side_effect=mocked_verify_token)
     @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
@@ -3301,6 +3294,10 @@ class LoginTestCase(TestCase):
          generate a new device instead of last device, with create a TOTP-Device for user after that user should be set otp-token for authenticate (login)
         :return:
         """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+
         # Call route /login/
         response = self.client.post('/login/', data={
             'username': 'test',
@@ -3314,7 +3311,7 @@ class LoginTestCase(TestCase):
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION='Token ' + token)
         response = client.post('/totp/').json()
-        device = TOTPDevice.objects.get(user_id=1)
+        device = TOTPDevice.objects.get(user=user)
         # Check generate device for this user
         self.assertTrue(device)
         qrcode_1 = TOTPDeviceViewSet.get_qr_code(device.config_url)
@@ -3349,6 +3346,7 @@ class LoginTestCase(TestCase):
         In this scenario done checking OTP-Token, that is invalid.
         :return:
         """
+        User.objects.create_user(username='test', password='test')
         # Call route /login/
         response = self.client.post('/login/',
                                     data={
@@ -3370,3 +3368,4 @@ class LoginTestCase(TestCase):
                                         'otp_token': '4321'
                                     }).json()
         self.assertEqual(response, {'non_field_errors': ['OTP Token is invalid.']})
+        TOTPDevice.objects.all().delete()
