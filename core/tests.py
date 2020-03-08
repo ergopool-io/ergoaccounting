@@ -25,6 +25,7 @@ from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, gener
 from core.utils import RewardAlgorithm, get_miner_payment_address
 from core.views import TOTPDeviceViewSet
 from django_otp.plugins.otp_totp.models import TOTPDevice
+from rest_framework.authtoken.models import Token
 
 def random_string(length=10):
     """Generate a random string of fixed length """
@@ -3275,7 +3276,9 @@ class AdministratorUserTestCase(TestCase):
 class LoginTestCase(TransactionTestCase):
     reset_sequences = True
 
-    def mocked_verify_recaptcha(self):
+    DEVICE_CONFIG = getattr(settings, "DEVICE_CONFIG")
+
+    def mocked_verify_recaptcha(*args, **kwargs):
         return {'success': True}
 
     def mocked_verify_token(*args, **kwargs):
@@ -3284,20 +3287,16 @@ class LoginTestCase(TransactionTestCase):
         if args[0] == '4321':
             return False
 
-
     @patch('django_otp.plugins.otp_totp.models.TOTPDevice.verify_token', side_effect=mocked_verify_token)
     @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
-    def test_valid_TOTP(self, mock_verify_recaptcha, mock_TOTP_verify):
+    def test_valid_first_login(self, mock_verify_recaptcha, mock_TOTP_verify):
         """
-        In this scenario check first login for get token after that check route /totp/ for create TOTP-device,
-        after that check response that equal QR-Code generated, after that check with second call route totp should be
-         generate a new device instead of last device, with create a TOTP-Device for user after that user should be set otp-token for authenticate (login)
+        In this scenario check first login for, getting token with out otp_token.
         :return:
         """
         # Create User
         self.factory = RequestFactory()
         user = User.objects.create_user(username='test', password='test')
-
         # Call route /login/
         response = self.client.post('/login/', data={
             'username': 'test',
@@ -3305,23 +3304,22 @@ class LoginTestCase(TransactionTestCase):
             'recaptcha_code': 'abcd'
         }).json()
         # Check generate token
-        self.assertTrue('token' in response)
-        token = response['token']
-        # Create TOTP-Device with route /totp/
-        client = APIClient()
-        client.credentials(HTTP_AUTHORIZATION='Token ' + token)
-        response = client.post('/totp/').json()
-        device = TOTPDevice.objects.get(user=user)
-        # Check generate device for this user
-        self.assertTrue(device)
-        qrcode_1 = TOTPDeviceViewSet.get_qr_code(device.config_url)
-        # checking QR-Code for this device equals to the response of this route or no
-        self.assertEqual(qrcode_1, response['qrcode'])
-        # Check reload new secret key for this device if device exist.
-        client.post('/totp/').json()
-        device = TOTPDevice.objects.get(user_id=1)
-        qrcode_2 = TOTPDeviceViewSet.get_qr_code(device.config_url)
-        self.assertNotEqual(qrcode_1, qrcode_2)
+        token = Token.objects.filter(user=user).first()
+        self.assertEqual(token.key, response['token'])
+
+    @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
+    def test_login_with_OTP_device_empty_otp_toekn(self, mock_verify_recaptcha):
+        """
+        if a user have OTP-Device should be enter otp-token
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create device for this user
+        device_config = self.DEVICE_CONFIG.copy()
+        device_config.update({'user': user, 'name': user.username, 'confirmed': True})
+        TOTPDevice.objects.create(**device_config)
         # Call route /login/ for the time being device created for user should be enter OTP-token
         response = self.client.post('/login/', data={
             'username': 'test',
@@ -3331,34 +3329,45 @@ class LoginTestCase(TransactionTestCase):
         self.assertEqual(response, {
             'non_field_errors': ['For this user, Two-Step verification is active so OTP Token is required.']
         })
+
+    @patch('django_otp.plugins.otp_totp.models.TOTPDevice.verify_token', side_effect=mocked_verify_token)
+    @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
+    def test_login_with_OTP_device_valid(self, mock_verify_recaptcha, mock_TOTP_verify):
+        """
+        OTP-Token is valid should be return a token in response
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create device for this user
+        device_config = self.DEVICE_CONFIG.copy()
+        device_config.update({'user': user, 'name': user.username, 'confirmed': True})
+        TOTPDevice.objects.create(**device_config)
+        # Call route /login/ for the time being device created for user should be enter OTP-token
         response = self.client.post('/login/', data={
             'username': 'test',
             'password': 'test',
             'recaptcha_code': 'abcd',
             'otp_token': '1234'
         }).json()
-        self.assertEqual(response['token'], token)
+        token = Token.objects.filter(user=user).first()
+        self.assertEqual(token.key, response['token'])
 
     @patch('django_otp.plugins.otp_totp.models.TOTPDevice.verify_token', side_effect=mocked_verify_token)
     @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
-    def test_invalid_TOTP(self, mock_verify_recaptcha, mock_TOTP_verify):
+    def test_login_with_OTP_device_invalid(self, mock_verify_recaptcha, mock_TOTP_verify):
         """
-        In this scenario done checking OTP-Token, that is invalid.
+        In this scenario checking OTP-Token, that is invalid.
         :return:
         """
-        User.objects.create_user(username='test', password='test')
-        # Call route /login/
-        response = self.client.post('/login/',
-                                    data={
-                                        'username': 'test',
-                                        'password': 'test',
-                                        'recaptcha_code': 'abcd'}).json()
-
-        token = response['token']
-        # Create TOTP-Device with route /totp/ for this user
-        client = APIClient()
-        client.credentials(HTTP_AUTHORIZATION='Token ' + token)
-        client.post('/totp/').json()
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create device for this user
+        device_config = self.DEVICE_CONFIG.copy()
+        device_config.update({'user': user, 'name': user.username, 'confirmed': True})
+        TOTPDevice.objects.create(**device_config)
         # checking OTP-Token that is invalid.
         response = self.client.post('/login/',
                                     data={
@@ -3368,4 +3377,54 @@ class LoginTestCase(TransactionTestCase):
                                         'otp_token': '4321'
                                     }).json()
         self.assertEqual(response, {'non_field_errors': ['OTP Token is invalid.']})
-        TOTPDevice.objects.all().delete()
+
+
+class TOTPTestCase(TransactionTestCase):
+    reset_sequences = True
+    DEVICE_CONFIG = getattr(settings, "DEVICE_CONFIG")
+
+    def test_QR_first_device(self):
+        """
+        In this scenario checking route /totp/ for create TOTP-device in first time,
+        after that checking QR-Code generated of this route equal with QR-Code of device
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create token for this user
+        token, created = Token.objects.get_or_create(user=user)
+        # Create TOTP-Device with route /totp/
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        response = client.post('/totp/').json()
+        # Check create device for this user
+        device = TOTPDevice.objects.filter(user=user).first()
+        self.assertIsNotNone(device)
+        qrcode_1 = TOTPDeviceViewSet.get_qr_code(device.config_url)
+        # checking QR-Code for this device equals to the response of this route or no
+        self.assertEqual(qrcode_1, response['qrcode'])
+
+    def test_second_device(self):
+        """
+         In this scenario checking with call route /totp/ for user that have device should be
+         generate a new device instead of last device, with create a TOTP-Device for user.
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create token for this user
+        token, created = Token.objects.get_or_create(user=user)
+        # create device for this user
+        device_config = self.DEVICE_CONFIG.copy()
+        device_config.update({'user': user, 'name': user.username, 'confirmed': True})
+        device = TOTPDevice.objects.create(**device_config)
+        # Create TOTP-Device with route /totp/
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        # Check reload new secret key for this device when device exist.
+        response = client.post('/totp/').json()
+        qrcode = TOTPDeviceViewSet.get_qr_code(device.config_url)
+        self.assertNotEqual(qrcode, response['qrcode'])
+
