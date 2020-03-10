@@ -13,20 +13,20 @@ from django.utils import timezone
 from django.utils.timezone import get_current_timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
-from rest_framework.authentication import SessionAuthentication, TokenAuthentication
-from rest_framework.authtoken.models import Token
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from core.authentication import ExpireTokenAuthentication
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
     LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT, \
     TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
 from core.authentication import CustomPermission
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo
+    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
     ErgoAuthTokenSerializer
 from core.tasks import generate_and_send_transaction
@@ -58,7 +58,7 @@ class CustomPaginationLimitOffset(LimitOffsetPagination):
 
 class ShareView(viewsets.GenericViewSet,
                 mixins.CreateModelMixin):
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
     permission_classes = [CustomPermission]
     queryset = Share.objects.all()
     serializer_class = ShareSerializer
@@ -132,7 +132,7 @@ class BalanceView(viewsets.GenericViewSet,
 class ConfigurationViewSet(viewsets.GenericViewSet,
                            mixins.CreateModelMixin,
                            mixins.ListModelMixin):
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
     permission_classes = [CustomPermission]
     serializer_class = ConfigurationSerializer
     queryset = Configuration.objects.all()
@@ -713,7 +713,7 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     ordering = 'user'
 
     # For session authentication
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
     # For token authentication
     permission_classes = (IsAuthenticated,)
 
@@ -802,6 +802,7 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
 class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.ListModelMixin):
     serializer_class = ErgoAuthTokenSerializer
     queryset = Token.objects.all()
+    DEFAULT_TOKEN_EXPIRE = getattr(settings, "DEFAULT_TOKEN_EXPIRE")
 
     def list(self, request, *args, **kwargs):
         """
@@ -818,6 +819,12 @@ class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.Lis
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
         token, created = Token.objects.get_or_create(user=user)
+        # Checking state that the token of user expired and generate new token for this user.
+        if not created:
+            if not (timezone.now() - timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['PER_USE'])) < token.last_use or\
+                    not (timezone.now() - timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['TOTAL'])) < token.created:
+                token.delete()
+                token = Token.objects.create(user=user)
         headers = self.get_success_headers(serializer.data)
         return Response({'token': token.key}, status=status.HTTP_201_CREATED, headers=headers)
 
@@ -826,7 +833,7 @@ class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins
     # serializer_class = TOTPDeviceSerializer
     queryset = TOTPDevice.objects.all()
     # For session authentication
-    authentication_classes = [TokenAuthentication]
+    authentication_classes = [ExpireTokenAuthentication]
     # For token authentication
     permission_classes = (IsAuthenticated,)
 

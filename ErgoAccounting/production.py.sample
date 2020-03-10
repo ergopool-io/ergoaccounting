@@ -195,3 +195,10 @@ QR_CONFIG = {
     'QR_BOX_SIZE': 10,
     'QR_BORDER': 4
 }
+
+DEFAULT_TOKEN_EXPIRE = {
+    # if the user doesn't use the token in this period token expires.
+    'PER_USE': 24 * 60 * 60,
+    # the token expires after this time.
+    'TOTAL': 10 * 24 * 60 * 60
+}
