@@ -18,14 +18,13 @@ from rest_framework import status
 from django.conf import settings
 
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
-    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo
+    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, TokenAuth as Token
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
 from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction,\
     get_ergo_price, periodic_verify_blocks
 from core.utils import RewardAlgorithm, get_miner_payment_address
 from core.views import TOTPDeviceViewSet
 from django_otp.plugins.otp_totp.models import TOTPDevice
-from rest_framework.authtoken.models import Token
 
 def random_string(length=10):
     """Generate a random string of fixed length """
@@ -3273,10 +3272,14 @@ class AdministratorUserTestCase(TestCase):
         self.assertEqual(response, ['Filter range for last_ip is invalid.'])
 
 
+time_now = [timezone.now()]
+
+
 class LoginTestCase(TransactionTestCase):
     reset_sequences = True
-
+    TIME = time_now
     DEVICE_CONFIG = getattr(settings, "DEVICE_CONFIG")
+    DEFAULT_TOKEN_EXPIRE = getattr(settings, 'DEFAULT_TOKEN_EXPIRE')
 
     def mocked_verify_recaptcha(*args, **kwargs):
         return {'success': True}
@@ -3287,9 +3290,11 @@ class LoginTestCase(TransactionTestCase):
         if args[0] == '4321':
             return False
 
-    @patch('django_otp.plugins.otp_totp.models.TOTPDevice.verify_token', side_effect=mocked_verify_token)
+    def mocked_time(*args, **kwargs):
+        return time_now[0]
+
     @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
-    def test_valid_first_login(self, mock_verify_recaptcha, mock_TOTP_verify):
+    def test_valid_first_login(self, mock_verify_recaptcha):
         """
         In this scenario check first login for, getting token with out otp_token.
         :return:
@@ -3306,6 +3311,31 @@ class LoginTestCase(TransactionTestCase):
         # Check generate token
         token = Token.objects.filter(user=user).first()
         self.assertEqual(token.key, response['token'])
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
+    def test_valid_second_login_expired_token(self, mock_verify_recaptcha, mock_time):
+        """
+        In this scenario we expect after expire token with login user delete last token and create new token for user.
+        :param mock_verify_recaptcha:
+        :param mock_time:
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # Create token for above user
+        token = Token.objects.create(user=user)
+        token = token.key
+        # Forward time to size DEFAULT_TOKEN_EXPIRE['PER_USE'] ( The token has now expired )
+        self.TIME[0] = timezone.now() + timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['PER_USE'])
+        # Call route /login/
+        response = self.client.post('/login/', data={
+            'username': 'test',
+            'password': 'test',
+            'recaptcha_code': 'abcd'
+        }).json()
+        self.assertNotEqual(token, response['token'])
 
     @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
     def test_login_with_OTP_device_empty_otp_toekn(self, mock_verify_recaptcha):
@@ -3377,6 +3407,61 @@ class LoginTestCase(TransactionTestCase):
                                         'otp_token': '4321'
                                     }).json()
         self.assertEqual(response, {'non_field_errors': ['OTP Token is invalid.']})
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_login_with_expire_token_per_use(self, mock):
+        """
+        In this scenario checking expired token after passing DEFAULT_TOKEN_EXPIRE from last use user this token.
+        :param mock:
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # Create token for above user
+        token = Token.objects.create(user=user)
+        # Set token for send request
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        # Call a request that need Token authenticate
+        response = client.post('/totp/')
+        self.assertEqual(response.status_code, 201)
+        # Take time forward to one day later
+        self.TIME[0] = timezone.now() + timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['PER_USE'])
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        response = client.post('/totp/')
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {'detail': 'Expired token.'})
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_login_with_expire_token_TOTAL(self, mock):
+        """
+        In this scenario we want checking expired token after passing DEFAULT_TOKEN_EXPIRE['TOTAL'] from created token.
+        :param mock:
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # Create token for above user
+        token = Token.objects.create(user=user)
+        # Set token for send request
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        # Call a request that need Token authenticate
+        response = client.post('/totp/')
+        self.assertEqual(response.status_code, 201)
+        # We take the time forward as much as DEFAULT_TOKEN_EXPIRE['TOTAL']
+        self.TIME[0] = timezone.now() + timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['TOTAL'])
+        # Update last_use token to half a day after now time
+        token.last_use = timezone.now() + timedelta(seconds=(self.DEFAULT_TOKEN_EXPIRE['TOTAL'] - 9.5 * 24 * 60 * 60))
+        token.save()
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        response = client.post('/totp/')
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {'detail': 'Expired token.'})
 
 
 class TOTPTestCase(TransactionTestCase):
