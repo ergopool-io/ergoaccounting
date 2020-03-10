@@ -6,6 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models as models
 from frozendict import frozendict
 from postgres_copy import CopyManager
+from rest_framework.authtoken.models import Token
 
 
 logger = logging.getLogger(__name__)
@@ -261,3 +262,13 @@ class ExtraInfo(models.Model):
 
     def __str__(self):
         return self.key + ": " + str(self.value)
+
+
+class TokenAuth(Token):
+    """
+    Extend last_use parameter for checking expire token.
+    """
+    last_use = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.key
