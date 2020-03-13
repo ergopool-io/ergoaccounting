@@ -13,7 +13,7 @@ from django.contrib.auth.models import User
 from django.test.client import RequestFactory
 from rest_framework.test import APIClient
 from django.utils import timezone
-from mock import patch, call
+from mock import patch, call, mock_open
 from rest_framework import status
 from django.conf import settings
 
@@ -3513,3 +3513,34 @@ class TOTPTestCase(TransactionTestCase):
         qrcode = TOTPDeviceViewSet.get_qr_code(device.config_url)
         self.assertNotEqual(qrcode, response['qrcode'])
 
+
+class UIDataTestCase(TransactionTestCase):
+    reset_sequences = True
+    DEFAULT_UI_PREFIX_DIRECTORY = getattr(settings, 'DEFAULT_UI_PREFIX_DIRECTORY')
+
+    def setUp(self):
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='x', password='y')
+        # Create token for above user
+        token = Token.objects.create(user=user)
+        self.token = token
+
+    @patch("builtins.open", new_callable=mock_open)
+    def test_patch_get(self, mock_file):
+        self.client.get('/ui/test/about/', **{'HTTP_source-ip': '127.0.0.1'}).json()
+        mock_file.assert_called_with(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, 'test/about'), 'r')
+
+    @patch("os.makedirs")
+    @patch("builtins.open", new_callable=mock_open)
+    def test_patch_post(self, mock_file, mock_make_dir):
+        # Set token for send request
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + self.token.key)
+        client.post(path='/ui/test/about/', data=json.dumps({
+            "data": {
+                "test": "test"
+            }
+        }), content_type='application/json', **{'HTTP_source-ip': '127.0.0.1'})
+        mock_file.assert_called_with(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, 'test/about'), 'w')
+        mock_make_dir.assert_called_with(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, 'test'), mode=0o750, exist_ok=True)

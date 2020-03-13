@@ -1,5 +1,5 @@
 from rest_framework import routers
-from django.urls import path
+from django.urls import path, re_path
 from rest_framework.authtoken.views import obtain_auth_token
 
 from .views import *
@@ -14,8 +14,10 @@ router.register(r'info', InfoViewSet, basename='Info')
 router.register(r'login', ErgoAuthToken, basename='login')
 router.register(r'administrator/users', AdministratorUserViewSet, basename='Administrator')
 router.register(r'totp', TOTPDeviceViewSet, basename='TOTP Device')
+router.register(r'ui', UIDataViewSet, basename='UI Data')
 
 urlpatterns = router.urls
-# urlpatterns += [
-#     path('api-token-auth/', obtain_auth_token, name='api_token_auth'),
-# ]
+urlpatterns += [
+    # path('api-token-auth/', obtain_auth_token, name='api_token_auth'),
+    re_path('ui/(?P<url>.*)/$', UIDataViewSet.as_view({'get': 'list', 'post': 'create'}), name='default'),
+]
