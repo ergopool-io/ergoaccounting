@@ -1,4 +1,4 @@
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, BasePermission, SAFE_METHODS
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from django.utils.translation import gettext_lazy as _
@@ -16,6 +16,11 @@ class CustomPermission(IsAuthenticated):
             return True
 
         return super(CustomPermission, self).has_permission(request, view)
+
+
+class ReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        return request.method in SAFE_METHODS
 
 
 class ExpireTokenAuthentication(TokenAuthentication):
