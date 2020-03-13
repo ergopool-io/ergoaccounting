@@ -202,3 +202,6 @@ DEFAULT_TOKEN_EXPIRE = {
     # the token expires after this time.
     'TOTAL': 10 * 24 * 60 * 60
 }
+
+# Default prefix for save data of UI
+DEFAULT_UI_PREFIX_DIRECTORY = '../UIData/'

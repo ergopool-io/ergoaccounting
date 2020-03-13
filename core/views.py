@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta
 from pydoc import locate
 from urllib.parse import urljoin
+import json
 
 import django_filters as filters_rest
 import requests
@@ -17,18 +18,16 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from core.authentication import ExpireTokenAuthentication
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
     LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT, \
     TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
-from core.authentication import CustomPermission
+from core.authentication import CustomPermission, ReadOnly, ExpireTokenAuthentication
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
-    ErgoAuthTokenSerializer
+    ErgoAuthTokenSerializer, TOTPDeviceSerializer, UIDataSerializer
 from core.tasks import generate_and_send_transaction
 from core.utils import RewardAlgorithm, BlockDataIterable
 from django_otp.plugins.otp_totp.models import TOTPDevice
@@ -36,6 +35,7 @@ from django_otp.util import random_hex
 import qrcode
 import base64
 from io import BytesIO
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -715,7 +715,7 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     # For session authentication
     authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
     # For token authentication
-    permission_classes = (IsAuthenticated,)
+    permission_classes = [CustomPermission]
 
     def get_miners(self):
         """
@@ -829,13 +829,13 @@ class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.Lis
         return Response({'token': token.key}, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.UpdateModelMixin):
-    # serializer_class = TOTPDeviceSerializer
+class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin,):
+    serializer_class = TOTPDeviceSerializer
     queryset = TOTPDevice.objects.all()
     # For session authentication
     authentication_classes = [ExpireTokenAuthentication]
     # For token authentication
-    permission_classes = (IsAuthenticated,)
+    permission_classes = [CustomPermission]
 
     @staticmethod
     def get_qr_code(device_url):
@@ -867,6 +867,7 @@ class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins
             'name': request.user.username,
             'confirmed': True
         })
+        # TODO: It is possible for AnonymousUser to get an exception because permission_classes set CustomPermission.
         # Create new device totp if not exist
         device, flag = TOTPDevice.objects.update_or_create(**device_config)
         # if device for this user exist generate new secret key and update device
@@ -874,3 +875,95 @@ class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins
             device.key = random_hex(20)
             device.save()
         return Response({'qrcode': self.get_qr_code(device.config_url)}, status=status.HTTP_201_CREATED)
+
+
+class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateModelMixin):
+    serializer_class = UIDataSerializer
+    # For session authentication
+    authentication_classes = [ExpireTokenAuthentication]
+    # For token authentication
+    permission_classes = [CustomPermission|ReadOnly]
+
+    DEFAULT_UI_PREFIX_DIRECTORY = getattr(settings, 'DEFAULT_UI_PREFIX_DIRECTORY')
+
+    def list(self, request, *args, **kwargs):
+        """
+        If exist a file with name last prefix in URL, returns them.
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        # get the full path
+        path = self.request.parser_context.get('kwargs').get('url')
+        # split / if exist end of path
+        dir = os.path.dirname(path)
+        # get json from file
+        try:
+            with open(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path), "r") as read_file:
+                json_data = json.load(read_file)
+        except FileNotFoundError:
+            logger.error("no such file or directory in path {}".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path))
+            )
+            return Response({'error': 'No such file or directory !'}, status=status.HTTP_404_NOT_FOUND)
+        except NotADirectoryError:
+            logger.error("this path is wrong {}".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path))
+            )
+            return Response({'error': 'This path is wrong.'}, status=status.HTTP_400_BAD_REQUEST)
+        except IsADirectoryError:
+            logger.error("this path is wrong because exist a directory with same name in path {}".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+            )
+            return Response({
+                'error': 'This path is wrong because exist a directory with same name in this path.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except json.JSONDecodeError as e:
+            logger.error("can't decode json in path {}". format(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir)))
+            logger.error(e)
+            return Response({'error': 'Data was corrupted !'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(json_data, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        """
+        create directory and file also write data in file
+        last prefix in url is name file.
+        Note: the data input should be structure of JSON for example must use double-quote not quote.
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        # get the full path
+        path = self.request.parser_context.get('kwargs').get('url')
+        # split / if exist end of path
+        dir = os.path.dirname(path)
+        # Create directory
+        try:
+            os.makedirs(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir), mode=0o750, exist_ok=True)
+        except OSError as e:
+            logger.error("Creating a directory for path {} give a problem ".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+            )
+            logger.error(e)
+            return Response({
+                'error': 'Creating a directory for this path give a problem !!'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        # Write data in file
+        try:
+            with open(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path), 'w') as outfile:
+                json.dump(serializer.data['data'], outfile)
+        except IsADirectoryError:
+            logger.error("this path is wrong because exist a directory with same name in path {}".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+            )
+            return Response({
+                'error': 'This path is wrong because exist a directory with same name in this path.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response({'reason': 'Saved data!'}, status=status.HTTP_201_CREATED, headers=headers)

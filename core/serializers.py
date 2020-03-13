@@ -6,7 +6,6 @@ from core import utils
 from .models import *
 import logging
 import django_otp
-from django_otp.plugins.otp_totp.models import TOTPDevice
 
 logger = logging.getLogger(__name__)
 
@@ -178,3 +177,14 @@ class ErgoAuthTokenSerializer(serializers.Serializer):
                 raise ValidationError("OTP Token is invalid.", code='authorization')
         attrs['user'] = user
         return attrs
+
+
+class TOTPDeviceSerializer(serializers.Serializer):
+    pass
+
+
+class UIDataSerializer(serializers.Serializer):
+    data = serializers.JSONField()
+
+    class Meta:
+        fields = ['data']
