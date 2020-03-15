@@ -489,7 +489,7 @@ class PropFunctionTest(TestCase):
         :return:
         """
         reward = RewardAlgorithm.get_instance().get_reward_to_share()
-        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
+        Configuration.objects.filter(key='FEE_FACTOR').update(value=str(10e9 / reward))
         share = self.shares[14]
         self.prop(share)
         balances = self.get_share_balance(share)

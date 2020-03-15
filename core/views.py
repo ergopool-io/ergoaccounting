@@ -886,6 +886,9 @@ class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Creat
 
     DEFAULT_UI_PREFIX_DIRECTORY = getattr(settings, 'DEFAULT_UI_PREFIX_DIRECTORY')
 
+    def get_queryset(self):
+        return None
+
     def list(self, request, *args, **kwargs):
         """
         If exist a file with name last prefix in URL, returns them.
