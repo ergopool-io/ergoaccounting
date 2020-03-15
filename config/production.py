@@ -206,4 +206,4 @@ DEFAULT_TOKEN_EXPIRE = {
 }
 
 # Default prefix for save data of UI
-DEFAULT_UI_PREFIX_DIRECTORY = '../UIData/'
+DEFAULT_UI_PREFIX_DIRECTORY = os.environ.get("UI_VOLUME", os.path.join(BASE_DIR, 'ui/'))
