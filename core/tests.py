@@ -675,8 +675,41 @@ class UserApiTestCase(TestCase):
     def get_hash_rate_url(self, pk):
         return urljoin(urljoin('/user/', pk) + '/', 'hash_rate') + '/'
 
+    def get_share_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'share') + '/'
+
     def mocked_time(*args, **kwargs):
         return datetime(2020, 1, 1, 8, 59, 20, 395985, tzinfo=timezone.utc)
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_share_default_value(self, mock_time):
+        """
+        In this scenario we expect with call action share for a user get number of valid and invalid between
+        timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_DIAGRAM and timezone.now().timestamp()
+         in half-hour intervals
+        :return:
+        """
+        response = self.client.get(self.get_share_url('hash')).json()
+        with open("core/data_testing/user_share_default_value.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_share_with_filter(self, mock_time):
+        """
+        In this scenario we expect with call action share for a user, get number of valid and invalid shares between
+         start and stop filter query in half-hour intervals
+        :return:
+        """
+        data = {
+            "start": 1577858420,
+            "stop": 1577869220
+        }
+        response = self.client.get(self.get_share_url('hash'), data).json()
+        print(response)
+        with open("core/data_testing/user_share_with_filter.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
 
     @patch('django.utils.timezone.now', side_effect=mocked_time)
     def test_hash_rate_default_value(self, mock_time):
