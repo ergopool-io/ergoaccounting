@@ -1,0 +1,37 @@
+[
+  {
+    "date": 1577858400,
+    "valid": 0,
+    "invalid": 0
+  },
+  {
+    "date": 1577860200,
+    "valid": 0,
+    "invalid": 0
+  },
+  {
+    "date": 1577862000,
+    "valid": 0,
+    "invalid": 0
+  },
+  {
+    "date": 1577863800,
+    "valid": 0,
+    "invalid": 0
+  },
+  {
+    "date": 1577865600,
+    "valid": 4,
+    "invalid": 1
+  },
+  {
+    "date": 1577867400,
+    "valid": 0,
+    "invalid": 0
+  },
+  {
+    "date": 1577869200,
+    "valid": 0,
+    "invalid": 0
+  }
+]
