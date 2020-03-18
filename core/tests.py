@@ -637,6 +637,27 @@ class UserApiTestCase(TestCase):
                                  created_at=self.now + timedelta(minutes=5), difficulty=67890987),
         ]
 
+        # base time for create_at shares
+        time = datetime(2020, 1, 1, 8, 0, 20, 395985, tzinfo=timezone.utc)
+        # create miner for calculate hash_rate
+        self.miner_hash_rate = Miner.objects.create(public_key='hash', nick_name='hash')
+        # Create shares for calculate hash_rate
+        shares_hash_rate = [
+            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="solved", difficulty=1000),
+            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="valid", difficulty=98761234),
+            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="valid", difficulty=54329876),
+            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="invalid", difficulty=1000),
+            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="valid", difficulty=1234504321),
+            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="valid", difficulty=67890987),
+        ]
+        # Set timestamp for create_at shares
+        for i, share in enumerate(shares_hash_rate):
+            if i == 1:
+                share.created_at = time - timedelta(hours=6)
+            else:
+                share.created_at = time + timedelta(minutes=i)
+            share.save()
+
         # Create balances
         Balance.objects.create(miner=cur_miners[0], share=shares[0], balance=100, status="immature")
         Balance.objects.create(miner=cur_miners[0], share=shares[1], balance=200, status="immature")
@@ -650,6 +671,41 @@ class UserApiTestCase(TestCase):
 
     def get_withdraw_url(self, pk):
         return urljoin(urljoin('/user/', pk) + '/', 'withdraw') + '/'
+
+    def get_hash_rate_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'hash_rate') + '/'
+
+    def mocked_time(*args, **kwargs):
+        return datetime(2020, 1, 1, 8, 59, 20, 395985, tzinfo=timezone.utc)
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_hash_rate_default_value(self, mock_time):
+        """
+        In this scenario we expect call action hash_rate for a user and get average and current hash_rate between
+         timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_DIAGRAM and timezone.now().timestamp()
+         in half-hour intervals
+        :return:
+        """
+        response = self.client.get(self.get_hash_rate_url('hash')).json()
+        with open("core/data_testing/user_hash_rate_default_value.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_hash_rate_with_filter(self, mock_time):
+        """
+        In this scenario we expect call action hash_rate for a user and get average and current hash_rate between
+         start and stop filter query in half-hour intervals
+        :return:
+        """
+        data = {
+            "start": 1577858420,
+            "stop": 1577869220
+        }
+        response = self.client.get(self.get_hash_rate_url('hash'), data).json()
+        with open("core/data_testing/user_hash_rate_with_filter.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
 
     def test_miner_not_specified_threshold_valid(self):
         """
@@ -890,6 +946,9 @@ class UserApiTestCase(TestCase):
             }
         }
         """
+
+        self.miner_hash_rate.delete()
+
         for miner in self.miners:
             miner.delete()
 
