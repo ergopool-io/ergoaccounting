@@ -637,21 +637,36 @@ class UserApiTestCase(TestCase):
                                  created_at=self.now + timedelta(minutes=5), difficulty=67890987),
         ]
 
-        # base time for create_at shares
+        # base time for actions hash_rate and share
         time = datetime(2020, 1, 1, 8, 0, 20, 395985, tzinfo=timezone.utc)
-        # create miner for calculate hash_rate
-        self.miner_hash_rate = Miner.objects.create(public_key='hash', nick_name='hash')
-        # Create shares for calculate hash_rate
-        shares_hash_rate = [
-            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="solved", difficulty=1000),
-            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="valid", difficulty=98761234),
-            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="valid", difficulty=54329876),
-            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="invalid", difficulty=1000),
-            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="valid", difficulty=1234504321),
-            Share.objects.create(share=random_string(), miner=self.miner_hash_rate, status="valid", difficulty=67890987),
+        # create miner for actions hash_rate, share, income
+        self.miner_actions = Miner.objects.create(public_key='hash', nick_name='hash')
+        # Create shares for actions hash_rate, share, income 
+        shares_actions = [
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
+                                 difficulty=1000, block_height=1006),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
+                                 difficulty=98761234, block_height=1005),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="valid",
+                                 difficulty=54329876, block_height=1004),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="invalid",
+                                 difficulty=1000, block_height=1003),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
+                                 difficulty=1234504321, block_height=1002),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
+                                 difficulty=67890987, block_height=1001),
         ]
+        # Create balances for action income
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[0], balance=100, status="immature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[1], balance=200, status="immature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[1], balance=300, status="mature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[2], balance=300, status="mature")
+        Balance.objects.create(miner=self.miner_actions, balance=-400, status="withdraw")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[4], balance=500, status="mature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[5], balance=600, status="mature")
+
         # Set timestamp for create_at shares
-        for i, share in enumerate(shares_hash_rate):
+        for i, share in enumerate(shares_actions):
             if i == 1:
                 share.created_at = time - timedelta(hours=6)
             else:
@@ -678,8 +693,21 @@ class UserApiTestCase(TestCase):
     def get_share_url(self, pk):
         return urljoin(urljoin('/user/', pk) + '/', 'share') + '/'
 
+    def get_income_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'income') + '/'
+
     def mocked_time(*args, **kwargs):
         return datetime(2020, 1, 1, 8, 59, 20, 395985, tzinfo=timezone.utc)
+
+    def test_income(self):
+        """
+        We expect to get list income of the user abc
+        :return:
+        """
+        response = self.client.get(self.get_income_url('hash')).json()
+        with open("core/data_testing/user_income.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
 
     @patch('django.utils.timezone.now', side_effect=mocked_time)
     def test_share_default_value(self, mock_time):
@@ -980,7 +1008,7 @@ class UserApiTestCase(TestCase):
         }
         """
 
-        self.miner_hash_rate.delete()
+        self.miner_actions.delete()
 
         for miner in self.miners:
             miner.delete()
