@@ -17,6 +17,7 @@ from mock import patch, call, mock_open
 from rest_framework import status
 from django.conf import settings
 
+from ErgoAccounting.production import DEFAULT_START_PAYOUT
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
     CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, TokenAuth as Token
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
@@ -656,15 +657,6 @@ class UserApiTestCase(TestCase):
             Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
                                  difficulty=67890987, block_height=1001),
         ]
-        # Create balances for action income
-        Balance.objects.create(miner=self.miner_actions, share=shares_actions[0], balance=100, status="immature")
-        Balance.objects.create(miner=self.miner_actions, share=shares_actions[1], balance=200, status="immature")
-        Balance.objects.create(miner=self.miner_actions, share=shares_actions[1], balance=300, status="mature")
-        Balance.objects.create(miner=self.miner_actions, share=shares_actions[2], balance=300, status="mature")
-        Balance.objects.create(miner=self.miner_actions, balance=-400, status="withdraw")
-        Balance.objects.create(miner=self.miner_actions, share=shares_actions[4], balance=500, status="mature")
-        Balance.objects.create(miner=self.miner_actions, share=shares_actions[5], balance=600, status="mature")
-
         # Set timestamp for create_at shares
         for i, share in enumerate(shares_actions):
             if i == 1:
@@ -672,6 +664,26 @@ class UserApiTestCase(TestCase):
             else:
                 share.created_at = time + timedelta(minutes=i)
             share.save()
+        # Create balances for action income
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[0], balance=100, status="immature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[1], balance=200, status="immature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[1], balance=300, status="mature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[2], balance=300, status="mature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[4], balance=500, status="mature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[5], balance=600, status="mature")
+
+        balance_actions = [
+            Balance.objects.create(miner=self.miner_actions, balance=-400, status="withdraw", max_height=1234),
+            Balance.objects.create(miner=self.miner_actions, balance=-600, status="withdraw", max_height=1235),
+            Balance.objects.create(miner=self.miner_actions, balance=-200, status="withdraw", max_height=1236),
+        ]
+        # Set timestamp for create_at shares
+        for i, balance in enumerate(balance_actions):
+            if i == 1:
+                balance.created_at = time - timedelta(days=4)
+            else:
+                balance.created_at = time - timedelta(hours=i)
+            balance.save()
 
         # Create balances
         Balance.objects.create(miner=cur_miners[0], share=shares[0], balance=100, status="immature")
@@ -696,8 +708,42 @@ class UserApiTestCase(TestCase):
     def get_income_url(self, pk):
         return urljoin(urljoin('/user/', pk) + '/', 'income') + '/'
 
+    def get_payout_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'payout') + '/'
+
     def mocked_time(*args, **kwargs):
         return datetime(2020, 1, 1, 8, 59, 20, 395985, tzinfo=timezone.utc)
+
+    @override_settings(DEFAULT_START_PAYOUT=1577577600)
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_payout_default_value(self, mock_time):
+        """
+        In this case checking ordering according to date and payout for miner hash with default value
+        :param mock_time:
+        :return:
+        """
+        response = self.client.get(self.get_payout_url('hash')).json()
+        with open("core/data_testing/user_payout_default_value.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    @override_settings(DEFAULT_START_PAYOUT=1577577600)
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_payout_with_filter(self, mock_time):
+        """
+        In this case checking ordering according to amount and payout for miner hash with filter start and stop
+        :param mock_time:
+        :return:
+        """
+        data = {
+            'start': 1577520020,
+            'stop': 1577869160,
+            'ordering': '-amount'
+        }
+        response = self.client.get(self.get_payout_url('hash'), data=data).json()
+        with open("core/data_testing/user_payout_with_filter.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
 
     def test_income(self):
         """
@@ -734,7 +780,6 @@ class UserApiTestCase(TestCase):
             "stop": 1577869220
         }
         response = self.client.get(self.get_share_url('hash'), data).json()
-        print(response)
         with open("core/data_testing/user_share_with_filter.json", "r") as read_file:
             file = json.load(read_file)
         self.assertEqual(file, response)
