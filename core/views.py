@@ -21,7 +21,7 @@ from rest_framework.pagination import PageNumberPagination, LimitOffsetPaginatio
 from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
-    LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT, \
+    LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, PERIOD_ACTIVE_MINERS_COUNT, \
     TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
 from core.authentication import CustomPermission, ReadOnly, ExpireTokenAuthentication
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
@@ -258,7 +258,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         # Set timezone
         tz = get_current_timezone()
         # Set start period for get data from data_base if there is not start param set DEFAULT_START_PAYOUT
-        start = int(query.get('start') or DEFAULT_START_PAYOUT)
+        start = int(query.get('start') or settings.DEFAULT_START_PAYOUT)
         # Rounding start time to first day
         start = int(timezone.datetime.fromtimestamp(start, tz=tz).replace(hour=0, minute=0, second=0).timestamp())
         # Set end period for get data from data_base if there is not stop param set time now
