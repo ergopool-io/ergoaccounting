@@ -194,3 +194,24 @@ class UIDataSerializer(serializers.Serializer):
 
     class Meta:
         fields = ['data']
+
+
+class SupportSerializer(serializers.Serializer):
+    recaptcha_code = serializers.CharField(label="recaptcha code")
+    name = serializers.CharField(required=False)
+    email = serializers.EmailField()
+    subject = serializers.CharField(required=False)
+    message = serializers.CharField()
+
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
+    def validate_recaptcha_code(self, value):
+        if not utils.verify_recaptcha(value):
+            raise ValidationError("please verify recaptcha code")
+
+    class Meta:
+        field = '__all__'

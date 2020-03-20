@@ -15,6 +15,7 @@ router.register(r'login', ErgoAuthToken, basename='login')
 router.register(r'administrator/users', AdministratorUserViewSet, basename='Administrator')
 router.register(r'totp', TOTPDeviceViewSet, basename='TOTP Device')
 router.register(r'ui', UIDataViewSet, basename='UI Data')
+router.register(r'support', SupportViewSet, basename='Support')
 
 urlpatterns = router.urls
 urlpatterns += [
