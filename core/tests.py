@@ -17,7 +17,6 @@ from mock import patch, call, mock_open
 from rest_framework import status
 from django.conf import settings
 
-from ErgoAccounting.production import DEFAULT_START_PAYOUT
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
     CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, TokenAuth as Token
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
