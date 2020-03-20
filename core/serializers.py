@@ -137,6 +137,12 @@ class MinerSerializer(serializers.ModelSerializer):
 
 
 class ErgoAuthTokenSerializer(serializers.Serializer):
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
     username = serializers.CharField(label=_("Username"))
     password = serializers.CharField(
         label=_("Password"),
@@ -146,7 +152,7 @@ class ErgoAuthTokenSerializer(serializers.Serializer):
     recaptcha_code = serializers.CharField(label="recaptcha code")
     otp_token = serializers.CharField(label="OTP_Token", required=False)
 
-    def validade_recaptcha_code(self, value):
+    def validate_recaptcha_code(self, value):
         if not utils.verify_recaptcha(value):
             raise ValidationError("please verify recaptcha code")
 
