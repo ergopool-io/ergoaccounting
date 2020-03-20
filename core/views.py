@@ -11,6 +11,7 @@ from django.db.models import Q, Count, Sum, Max, Min
 from django.db.utils import DataError
 from django.http import QueryDict
 from django.utils import timezone
+from django.core.mail import send_mail
 from django.utils.timezone import get_current_timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
@@ -27,7 +28,7 @@ from core.authentication import CustomPermission, ReadOnly, ExpireTokenAuthentic
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
-    ErgoAuthTokenSerializer, TOTPDeviceSerializer, UIDataSerializer
+    ErgoAuthTokenSerializer, TOTPDeviceSerializer, UIDataSerializer, SupportSerializer
 from core.tasks import generate_and_send_transaction
 from core.utils import RewardAlgorithm, BlockDataIterable
 from django_otp.plugins.otp_totp.models import TOTPDevice
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
 MAX_PAGINATION_SIZE = getattr(settings, "MAX_PAGINATION_SIZE")
 DEFAULT_PAGINATION_SIZE = getattr(settings, "DEFAULT_PAGINATION_SIZE")
-
+EMAIL_ADDRESS = getattr(settings, "EMAIL_ADDRESS")
 
 class CustomPagination(PageNumberPagination):
     page_size = DEFAULT_PAGINATION_SIZE
@@ -970,3 +971,35 @@ class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Creat
 
         headers = self.get_success_headers(serializer.data)
         return Response({'reason': 'Saved data!'}, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class SupportViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.ListModelMixin):
+    """
+    a API for send information of support form to admin system email.
+    """
+    serializer_class = SupportSerializer
+
+    def list(self, request, *args, **kwargs):
+        """
+        return site_key for RECAPTCHA.
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        return Response({"site_key": settings.RECAPTCHA_SITE_KEY})
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        headers = self.get_success_headers(serializer.data)
+        data = serializer.data
+        # Create message for send to admin system
+        message = "Name: %s\nEmail:%s\nMessage:%s" % (data.get('name'), data.get('email'), data.get('message'))
+        try:
+            send_mail('Support-Email: ' + data.get('subject'), message, EMAIL_ADDRESS, [EMAIL_ADDRESS, ])
+        except:
+            logger.debug("failed send email to admin system.")
+            return Response({'message': 'failed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR, headers=headers)
+        logger.info("send information of form support to admin system")
+        return Response({'message': 'ok'}, status=status.HTTP_200_OK, headers=headers)
