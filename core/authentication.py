@@ -26,6 +26,17 @@ class ReadOnly(BasePermission):
 class ExpireTokenAuthentication(TokenAuthentication):
     model = TokenAuth
     DEFAULT_TOKEN_EXPIRE = getattr(settings, "DEFAULT_TOKEN_EXPIRE")
+    IGNORE_AUTHENTICATE_ROUTE = getattr(settings, 'IGNORE_AUTHENTICATE_ROUTE', [''])
+
+    def authenticate(self, request):
+        """
+        override this function because we want for any route method 'GET' not check token if exist.
+        :param request:
+        :return:
+        """
+        if request.META.get('PATH_INFO') in self.IGNORE_AUTHENTICATE_ROUTE and request.method == 'GET':
+            return None
+        return super(ExpireTokenAuthentication, self).authenticate(request)
 
     def authenticate_credentials(self, key):
         """

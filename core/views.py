@@ -900,8 +900,13 @@ class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Creat
         """
         # get the full path
         path = self.request.parser_context.get('kwargs').get('url')
-        # split / if exist end of path
-        dir = os.path.dirname(path)
+        # get name directory
+        try:
+            directory = os.path.dirname(path)
+        except TypeError as e:
+            logger.info("path not entered.")
+            logger.info(e)
+            return Response({'error': 'path not entered.'}, status=status.HTTP_400_BAD_REQUEST)
         # get json from file
         try:
             with open(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path), "r") as read_file:
@@ -918,13 +923,13 @@ class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Creat
             return Response({'error': 'This path is wrong.'}, status=status.HTTP_400_BAD_REQUEST)
         except IsADirectoryError:
             logger.error("this path is wrong because exist a directory with same name in path {}".format(
-                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, directory))
             )
             return Response({
                 'error': 'This path is wrong because exist a directory with same name in this path.'
             }, status=status.HTTP_400_BAD_REQUEST)
         except json.JSONDecodeError as e:
-            logger.error("can't decode json in path {}". format(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir)))
+            logger.error("can't decode json in path {}". format(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, directory)))
             logger.error(e)
             return Response({'error': 'Data was corrupted !'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -944,14 +949,19 @@ class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Creat
         serializer.is_valid(raise_exception=True)
         # get the full path
         path = self.request.parser_context.get('kwargs').get('url')
-        # split / if exist end of path
-        dir = os.path.dirname(path)
+        # get name directory
+        try:
+            directory = os.path.dirname(path)
+        except TypeError as e:
+            logger.info("path not entered.")
+            logger.info(e)
+            return Response({'error': 'path not entered.'}, status=status.HTTP_400_BAD_REQUEST)
         # Create directory
         try:
-            os.makedirs(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir), mode=0o750, exist_ok=True)
+            os.makedirs(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, directory), mode=0o750, exist_ok=True)
         except OSError as e:
             logger.error("Creating a directory for path {} give a problem ".format(
-                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, directory))
             )
             logger.error(e)
             return Response({
@@ -963,7 +973,7 @@ class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Creat
                 json.dump(serializer.data['data'], outfile)
         except IsADirectoryError:
             logger.error("this path is wrong because exist a directory with same name in path {}".format(
-                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, directory))
             )
             return Response({
                 'error': 'This path is wrong because exist a directory with same name in this path.'
