@@ -207,3 +207,12 @@ DEFAULT_TOKEN_EXPIRE = {
 
 # Default prefix for save data of UI
 DEFAULT_UI_PREFIX_DIRECTORY = os.environ.get("UI_VOLUME", os.path.join(BASE_DIR, 'ui/'))
+
+
+# Config to send email
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.ergopool.io')
+EMAIL_PORT = os.environ.get('EMAIL_PORT', '587')
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'test')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', 'test')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', "yes") == "yes"
+EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS', 'support@eropool.io')
