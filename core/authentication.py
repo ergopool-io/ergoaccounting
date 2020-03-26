@@ -18,9 +18,16 @@ class CustomPermission(IsAuthenticated):
         return super(CustomPermission, self).has_permission(request, view)
 
 
-class ReadOnly(BasePermission):
+class ReadOnlyCustomPermission(IsAuthenticated):
     def has_permission(self, request, view):
-        return request.method in SAFE_METHODS
+        if request.method in SAFE_METHODS:
+            return True
+        header_keys = [x.lower() for x in dict(request.headers).keys()]
+        if 'source-ip' not in header_keys:
+            # request is coming from api
+            return True
+
+        return super(ReadOnlyCustomPermission, self).has_permission(request, view)
 
 
 class ExpireTokenAuthentication(TokenAuthentication):
@@ -47,4 +54,4 @@ class ExpireTokenAuthentication(TokenAuthentication):
             raise AuthenticationFailed(_('User inactive or deleted.'))
 
         token.save()
-        return (token.user, token)
+        return token.user, token

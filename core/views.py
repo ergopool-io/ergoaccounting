@@ -19,12 +19,14 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
+from rest_framework.permissions import SAFE_METHODS
 from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
     LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, PERIOD_ACTIVE_MINERS_COUNT, \
     TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
-from core.authentication import CustomPermission, ReadOnly, ExpireTokenAuthentication
+from core.authentication import CustomPermission, ReadOnlyCustomPermission, ExpireTokenAuthentication,\
+    ReadOnlyCustomPermission
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
@@ -883,9 +885,13 @@ class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Creat
     # For session authentication
     authentication_classes = [ExpireTokenAuthentication]
     # For token authentication
-    permission_classes = [CustomPermission|ReadOnly]
+    permission_classes = [ReadOnlyCustomPermission]
 
     DEFAULT_UI_PREFIX_DIRECTORY = getattr(settings, 'DEFAULT_UI_PREFIX_DIRECTORY')
+
+    def perform_authentication(self, request):
+        if request.method not in SAFE_METHODS:
+            super(UIDataViewSet, self).perform_authentication(request)
 
     def get_queryset(self):
         return None
