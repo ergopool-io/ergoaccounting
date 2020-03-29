@@ -212,4 +212,10 @@ EMAIL_PORT = 587
 EMAIL_HOST_USER = 'test'
 EMAIL_HOST_PASSWORD = 'test'
 EMAIL_USE_TLS = True
-EMAIL_ADDRESS = 'support@eropool.io'
+SENDER_EMAIL_ADDRESS = 'deploy.ergopool@gmail.com'
+RECEIVERS_EMAIL_ADDRESS = ['support@ergopool.io',]
+
+# Number of tries to call RUN TASK after a problem arises
+NUMBER_OF_RETRIES_RUN_TASK = 100
+# number that define it as an exponential value that gets increased by each retry
+NUMBER_START_EXPONENTIAL_RETRIES = 900
