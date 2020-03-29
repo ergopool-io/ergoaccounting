@@ -3715,7 +3715,8 @@ class TestSupport(TestCase):
     Test scenario get support information and check recaptcha code and send with email to admin system
     """
     RECAPTCHA_SITE_KEY = getattr(settings, 'RECAPTCHA_SITE_KEY')
-    EMAIL_ADDRESS = getattr(settings, 'EMAIL_ADDRESS')
+    SENDER_EMAIL_ADDRESS = getattr(settings, 'SENDER_EMAIL_ADDRESS')
+    RECEIVERS_EMAIL_ADDRESS = getattr(settings, 'RECEIVERS_EMAIL_ADDRESS')
 
     def mock_send_mail(*args, **kwargs):
         raise TypeError
@@ -3729,7 +3730,7 @@ class TestSupport(TestCase):
         self.assertEqual(response.get('site_key'), self.RECAPTCHA_SITE_KEY)
 
     @patch('core.utils.verify_recaptcha', return_value={'success': True})
-    @patch('core.views.send_mail')
+    @patch('core.tasks.send_support_email.delay')
     def test_send_email_support_post(self, mock_mail, mock_recaptcha):
         """
         In this test case should be send information of form support and get message ok with status_code 200
@@ -3745,31 +3746,7 @@ class TestSupport(TestCase):
             "message": "Please, Help."
         }
         response = self.client.post('/support/', data=data, content_type="application/json")
-        message = "Name: %s\nEmail:%s\nMessage:%s" % (data.get('name'), data.get('email'), data.get('message'))
-        mock_mail.assert_has_calls([call('Support-Email: ' + data.get('subject'), message,
-                                         self.EMAIL_ADDRESS, [self.EMAIL_ADDRESS, ])])
-        self.assertEqual(response.json().get('message'), 'ok')
+        message = "Name: %s\nEmail: %s\nMessage: %s" % (data.get('name'), data.get('email'), data.get('message'))
+        mock_mail.assert_has_calls([call(data.get('subject'), message)])
+        self.assertEqual(response.json().get('status'), ['ok'])
         self.assertEqual(response.status_code, 200)
-
-    @patch('core.utils.verify_recaptcha', return_value={'success': True})
-    @patch('core.views.send_mail', side_effect=mock_send_mail)
-    def test_send_email_support_post_failed(self, mock_mail, mock_recaptcha):
-        """
-        In this test case should be send information of form support and get message failed with status_code 500
-        :param mock_mail:
-        :param mock_recaptcha:
-        :return:
-        """
-        data = {
-            "recaptcha_code": "test",
-            "name": "Alex Chepurnoy",
-            "email": "test@ergopool.io",
-            "subject": "Problem Config Config proxy",
-            "message": "Please, Help."
-        }
-        response = self.client.post('/support/', data=data, content_type="application/json")
-        message = "Name: %s\nEmail:%s\nMessage:%s" % (data.get('name'), data.get('email'), data.get('message'))
-        mock_mail.assert_has_calls([call('Support-Email: ' + data.get('subject'), message,
-                                         self.EMAIL_ADDRESS, [self.EMAIL_ADDRESS, ])])
-        self.assertEqual(response.json().get('message'), 'failed')
-        self.assertEqual(response.status_code, 500)

@@ -4,7 +4,9 @@ from datetime import datetime
 from hashlib import blake2b
 from pathlib import Path
 from urllib.parse import urljoin
+import time
 
+from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, Sum, Count, Max, Min
@@ -531,3 +533,26 @@ def periodic_verify_blocks():
     logger.info('bulk updating transaction_valid field of shares, len: {}.'.format(shares.count()))
     Share.objects.bulk_update(shares, ['transaction_valid'])
     logger.info('done verifying blocks.')
+
+
+@app.task(bind=True, max_retries=settings.NUMBER_OF_RETRIES_RUN_TASK)
+def send_support_email(self, subject, message):
+    num_tried = 0
+    # after a problem arises tries to call logger.error the size of NUMBER_OF_LOG
+    try:
+        num_tried += 1
+        send_mail(
+            'Support-Email: ' + subject,
+            message,
+            settings.SENDER_EMAIL_ADDRESS,
+            settings.RECEIVERS_EMAIL_ADDRESS
+        )
+        logger.info("send information of form support to admin system")
+        return
+    except TypeError as e:
+        logger.error("failed send email to admin system, with this information: {}".format(message))
+        logger.error(e)
+    except:
+        logger.error("failed send email to admin system, because can't connect to SMTP server,"
+                     " with this information: {}".format(message))
+        self.retry(countdown=settings.NUMBER_START_EXPONENTIAL_RETRIES ** self.request.retries)
