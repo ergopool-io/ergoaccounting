@@ -210,9 +210,16 @@ DEFAULT_UI_PREFIX_DIRECTORY = os.environ.get("UI_VOLUME", os.path.join(BASE_DIR,
 
 
 # Config to send email
-EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.ergopool.io')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = os.environ.get('EMAIL_PORT', '587')
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'test')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', 'test')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', "yes") == "yes"
 EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS', 'support@eropool.io')
+SENDER_EMAIL_ADDRESS = os.environ.get('SENDER_EMAIL_ADDRESS', 'deploy.ergopool@gmail.com')
+RECEIVERS_EMAIL_ADDRESS = os.environ.get('RECEIVERS_EMAIL_ADDRESS', ['support@ergopool.io', ])
+
+# Number of tries to call RUN TASK after a problem arises
+NUMBER_OF_RETRIES_RUN_TASK = os.environ.get("NUMBER_OF_RETRIES_RUN_TASK")
+# number that define it as an exponential value that gets increased by each retry
+NUMBER_START_EXPONENTIAL_RETRIES = os.environ.get("NUMBER_START_EXPONENTIAL_RETRIES")

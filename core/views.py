@@ -11,7 +11,6 @@ from django.db.models import Q, Count, Sum, Max, Min
 from django.db.utils import DataError
 from django.http import QueryDict
 from django.utils import timezone
-from django.core.mail import send_mail
 from django.utils.timezone import get_current_timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
@@ -25,13 +24,12 @@ from rest_framework.response import Response
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
     LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, PERIOD_ACTIVE_MINERS_COUNT, \
     TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
-from core.authentication import CustomPermission, ReadOnlyCustomPermission, ExpireTokenAuthentication,\
-    ReadOnlyCustomPermission
+from core.authentication import CustomPermission, ReadOnlyCustomPermission, ExpireTokenAuthentication
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
     CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
     ErgoAuthTokenSerializer, TOTPDeviceSerializer, UIDataSerializer, SupportSerializer
-from core.tasks import generate_and_send_transaction
+from core.tasks import generate_and_send_transaction, send_support_email
 from core.utils import RewardAlgorithm, BlockDataIterable
 from django_otp.plugins.otp_totp.models import TOTPDevice
 from django_otp.util import random_hex
@@ -45,7 +43,9 @@ logger = logging.getLogger(__name__)
 ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
 MAX_PAGINATION_SIZE = getattr(settings, "MAX_PAGINATION_SIZE")
 DEFAULT_PAGINATION_SIZE = getattr(settings, "DEFAULT_PAGINATION_SIZE")
-EMAIL_ADDRESS = getattr(settings, "EMAIL_ADDRESS")
+RECEIVERS_EMAIL_ADDRESS = getattr(settings, "RECEIVERS_EMAIL_ADDRESS")
+SENDER_EMAIL_ADDRESS = getattr(settings, "SENDER_EMAIL_ADDRESS")
+
 
 class CustomPagination(PageNumberPagination):
     page_size = DEFAULT_PAGINATION_SIZE
@@ -1001,11 +1001,6 @@ class SupportViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.Li
         headers = self.get_success_headers(serializer.data)
         data = serializer.data
         # Create message for send to admin system
-        message = "Name: %s\nEmail:%s\nMessage:%s" % (data.get('name'), data.get('email'), data.get('message'))
-        try:
-            send_mail('Support-Email: ' + data.get('subject'), message, EMAIL_ADDRESS, [EMAIL_ADDRESS, ])
-        except:
-            logger.debug("failed send email to admin system.")
-            return Response({'message': 'failed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR, headers=headers)
-        logger.info("send information of form support to admin system")
-        return Response({'message': 'ok'}, status=status.HTTP_200_OK, headers=headers)
+        message = "Name: %s\nEmail: %s\nMessage: %s" % (data.get('name'), data.get('email'), data.get('message'))
+        send_support_email.delay(data.get('subject', 'No Subject'), message)
+        return Response({'status': ['ok']}, status=status.HTTP_200_OK, headers=headers)
