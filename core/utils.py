@@ -353,11 +353,16 @@ def get_miner_payment_address(miner):
 
 
 def verify_recaptcha(recaptcha_code):
+    """
+    Function for verify recaptcha with service google
+    :param recaptcha_code:
+    :return:
+    """
     url = "https://www.google.com/recaptcha/api/siteverify"
     post_data = {
-        "secret": settings.RECAPTCHA,
+        "secret": settings.RECAPTCHA_SECRET,
         "response": recaptcha_code
     }
-    response = requests.post(url, data=post_data)
-    return response["success"]
-
+    response = requests.post(url, data=post_data).json()
+    # return response.get('success')
+    return True

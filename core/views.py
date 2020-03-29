@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta
 from pydoc import locate
 from urllib.parse import urljoin
+import json
 
 import django_filters as filters_rest
 import requests
@@ -13,30 +14,37 @@ from django.utils import timezone
 from django.utils.timezone import get_current_timezone
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
-from rest_framework.authentication import SessionAuthentication, TokenAuthentication
-from rest_framework.authtoken.models import Token
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import SAFE_METHODS
 from rest_framework.response import Response
 
 from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFAULT_STOP_TIME_STAMP_DIAGRAM, \
-    LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, DEFAULT_START_PAYOUT, PERIOD_ACTIVE_MINERS_COUNT, \
-    TOTAL_PERIOD_COUNT_SHARE
-from core.authentication import CustomPermission
+    LIMIT_NUMBER_CHUNK_DIAGRAM, NUMBER_OF_LAST_INCOME, PERIOD_ACTIVE_MINERS_COUNT, \
+    TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
+from core.authentication import CustomPermission, ReadOnlyCustomPermission, ExpireTokenAuthentication
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo
+    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
-    ErgoAuthTokenSerializer
-from core.tasks import generate_and_send_transaction
+    ErgoAuthTokenSerializer, TOTPDeviceSerializer, UIDataSerializer, SupportSerializer
+from core.tasks import generate_and_send_transaction, send_support_email
 from core.utils import RewardAlgorithm, BlockDataIterable
+from django_otp.plugins.otp_totp.models import TOTPDevice
+from django_otp.util import random_hex
+import qrcode
+import base64
+from io import BytesIO
+import os
 
 logger = logging.getLogger(__name__)
 
 ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
 MAX_PAGINATION_SIZE = getattr(settings, "MAX_PAGINATION_SIZE")
 DEFAULT_PAGINATION_SIZE = getattr(settings, "DEFAULT_PAGINATION_SIZE")
+RECEIVERS_EMAIL_ADDRESS = getattr(settings, "RECEIVERS_EMAIL_ADDRESS")
+SENDER_EMAIL_ADDRESS = getattr(settings, "SENDER_EMAIL_ADDRESS")
 
 
 class CustomPagination(PageNumberPagination):
@@ -53,7 +61,7 @@ class CustomPaginationLimitOffset(LimitOffsetPagination):
 
 class ShareView(viewsets.GenericViewSet,
                 mixins.CreateModelMixin):
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
     permission_classes = [CustomPermission]
     queryset = Share.objects.all()
     serializer_class = ShareSerializer
@@ -127,7 +135,7 @@ class BalanceView(viewsets.GenericViewSet,
 class ConfigurationViewSet(viewsets.GenericViewSet,
                            mixins.CreateModelMixin,
                            mixins.ListModelMixin):
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
     permission_classes = [CustomPermission]
     serializer_class = ConfigurationSerializer
     queryset = Configuration.objects.all()
@@ -253,7 +261,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         # Set timezone
         tz = get_current_timezone()
         # Set start period for get data from data_base if there is not start param set DEFAULT_START_PAYOUT
-        start = int(query.get('start') or DEFAULT_START_PAYOUT)
+        start = int(query.get('start') or settings.DEFAULT_START_PAYOUT)
         # Rounding start time to first day
         start = int(timezone.datetime.fromtimestamp(start, tz=tz).replace(hour=0, minute=0, second=0).timestamp())
         # Set end period for get data from data_base if there is not stop param set time now
@@ -275,7 +283,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
             select={
                 'date': 'EXTRACT(epoch from "core_balance"."created_at"::DATE)'
             }
-        ).values('date').annotate(amount=Sum('balance')).order_by(order)
+        ).values('date', 'max_height').annotate(amount=Sum('balance')).order_by(order)
         balances = list(balances)
 
         # Create response
@@ -284,7 +292,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
             response.append({
                 "date": int(balance['date']),
                 "tx": None,
-                "height": None,
+                "height": int(balance['max_height']),
                 "amount": int(balance['amount'])
             })
         return response
@@ -708,9 +716,9 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
     ordering = 'user'
 
     # For session authentication
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
     # For token authentication
-    permission_classes = (IsAuthenticated,)
+    permission_classes = [CustomPermission]
 
     def get_miners(self):
         """
@@ -797,6 +805,7 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
 class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.ListModelMixin):
     serializer_class = ErgoAuthTokenSerializer
     queryset = Token.objects.all()
+    DEFAULT_TOKEN_EXPIRE = getattr(settings, "DEFAULT_TOKEN_EXPIRE")
 
     def list(self, request, *args, **kwargs):
         """
@@ -813,5 +822,185 @@ class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.Lis
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
         token, created = Token.objects.get_or_create(user=user)
+        # Checking state that the token of user expired and generate new token for this user.
+        if not created:
+            if not (timezone.now() - timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['PER_USE'])) < token.last_use or\
+                    not (timezone.now() - timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['TOTAL'])) < token.created:
+                token.delete()
+                token = Token.objects.create(user=user)
         headers = self.get_success_headers(serializer.data)
         return Response({'token': token.key}, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin,):
+    serializer_class = TOTPDeviceSerializer
+    queryset = TOTPDevice.objects.all()
+    # For session authentication
+    authentication_classes = [ExpireTokenAuthentication]
+    # For token authentication
+    permission_classes = [CustomPermission]
+
+    @staticmethod
+    def get_qr_code(device_url):
+        """
+        Create QR code base64 from otp-url
+        """
+        qr = qrcode.QRCode(version=QR_CONFIG.get('QR_VERSION'), error_correction=qrcode.constants.ERROR_CORRECT_L,
+                           box_size=QR_CONFIG.get('QR_BOX_SIZE'), border=QR_CONFIG.get('QR_BORDER'))
+        qr.add_data(device_url)
+        qr.make(fit=True)
+        img = qr.make_image()
+        output = BytesIO()
+        img.save(output)
+        qr_data = output.getvalue()
+        output.close()
+        return base64.b64encode(qr_data).decode('ascii')
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create or reload new device for user.
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        device_config = DEVICE_CONFIG.copy()
+        device_config.update({
+            'user': request.user,
+            'name': request.user.username,
+            'confirmed': True
+        })
+        # TODO: It is possible for AnonymousUser to get an exception because permission_classes set CustomPermission.
+        # Create new device totp if not exist
+        device, flag = TOTPDevice.objects.update_or_create(**device_config)
+        # if device for this user exist generate new secret key and update device
+        if not flag:
+            device.key = random_hex(20)
+            device.save()
+        return Response({'qrcode': self.get_qr_code(device.config_url)}, status=status.HTTP_201_CREATED)
+
+
+class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.CreateModelMixin):
+    serializer_class = UIDataSerializer
+    # For session authentication
+    authentication_classes = [ExpireTokenAuthentication]
+    # For token authentication
+    permission_classes = [ReadOnlyCustomPermission]
+
+    DEFAULT_UI_PREFIX_DIRECTORY = getattr(settings, 'DEFAULT_UI_PREFIX_DIRECTORY')
+
+    def perform_authentication(self, request):
+        if request.method not in SAFE_METHODS:
+            super(UIDataViewSet, self).perform_authentication(request)
+
+    def get_queryset(self):
+        return None
+
+    def list(self, request, *args, **kwargs):
+        """
+        If exist a file with name last prefix in URL, returns them.
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        # get the full path
+        path = self.request.parser_context.get('kwargs').get('url')
+        # split / if exist end of path
+        dir = os.path.dirname(path)
+        # get json from file
+        try:
+            with open(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path), "r") as read_file:
+                json_data = json.load(read_file)
+        except FileNotFoundError:
+            logger.error("no such file or directory in path {}".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path))
+            )
+            return Response({'error': 'No such file or directory !'}, status=status.HTTP_404_NOT_FOUND)
+        except NotADirectoryError:
+            logger.error("this path is wrong {}".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path))
+            )
+            return Response({'error': 'This path is wrong.'}, status=status.HTTP_400_BAD_REQUEST)
+        except IsADirectoryError:
+            logger.error("this path is wrong because exist a directory with same name in path {}".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+            )
+            return Response({
+                'error': 'This path is wrong because exist a directory with same name in this path.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except json.JSONDecodeError as e:
+            logger.error("can't decode json in path {}". format(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir)))
+            logger.error(e)
+            return Response({'error': 'Data was corrupted !'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(json_data, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        """
+        create directory and file also write data in file
+        last prefix in url is name file.
+        Note: the data input should be structure of JSON for example must use double-quote not quote.
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        # get the full path
+        path = self.request.parser_context.get('kwargs').get('url')
+        # split / if exist end of path
+        dir = os.path.dirname(path)
+        # Create directory
+        try:
+            os.makedirs(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir), mode=0o750, exist_ok=True)
+        except OSError as e:
+            logger.error("Creating a directory for path {} give a problem ".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+            )
+            logger.error(e)
+            return Response({
+                'error': 'Creating a directory for this path give a problem !!'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        # Write data in file
+        try:
+            with open(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, path), 'w') as outfile:
+                json.dump(serializer.data['data'], outfile)
+        except IsADirectoryError:
+            logger.error("this path is wrong because exist a directory with same name in path {}".format(
+                os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir))
+            )
+            return Response({
+                'error': 'This path is wrong because exist a directory with same name in this path.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response({'reason': 'Saved data!'}, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class SupportViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.ListModelMixin):
+    """
+    a API for send information of support form to admin system email.
+    """
+    serializer_class = SupportSerializer
+
+    def list(self, request, *args, **kwargs):
+        """
+        return site_key for RECAPTCHA.
+        :param request:
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        return Response({"site_key": settings.RECAPTCHA_SITE_KEY})
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        headers = self.get_success_headers(serializer.data)
+        data = serializer.data
+        # Create message for send to admin system
+        message = "Name: %s\nEmail: %s\nMessage: %s" % (data.get('name'), data.get('email'), data.get('message'))
+        send_support_email.delay(data.get('subject', 'No Subject'), message)
+        return Response({'status': ['ok']}, status=status.HTTP_200_OK, headers=headers)

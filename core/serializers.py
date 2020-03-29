@@ -5,6 +5,7 @@ from django.utils.translation import ugettext_lazy as _
 from core import utils
 from .models import *
 import logging
+import django_otp
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,12 @@ class MinerSerializer(serializers.ModelSerializer):
 
 
 class ErgoAuthTokenSerializer(serializers.Serializer):
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
     username = serializers.CharField(label=_("Username"))
     password = serializers.CharField(
         label=_("Password"),
@@ -143,8 +150,9 @@ class ErgoAuthTokenSerializer(serializers.Serializer):
         trim_whitespace=False
     )
     recaptcha_code = serializers.CharField(label="recaptcha code")
+    otp_token = serializers.CharField(label="OTP_Token", required=False)
 
-    def validade_recaptcha_code(self, value):
+    def validate_recaptcha_code(self, value):
         if not utils.verify_recaptcha(value):
             raise ValidationError("please verify recaptcha code")
 
@@ -165,6 +173,45 @@ class ErgoAuthTokenSerializer(serializers.Serializer):
         else:
             msg = _('Must include "username" and "password".')
             raise serializers.ValidationError(msg, code='authorization')
-
+        # check that the user has an OTP device or not.
+        if django_otp.user_has_device(user=user, confirmed=True):
+            # for users that have OTP device, OTP-token is required.
+            if not attrs.get('otp_token'):
+                raise ValidationError("For this user, Two-Step verification is active so OTP Token is required.")
+            # checked OTP Token that is valid or not
+            if not django_otp.match_token(user, attrs.get('otp_token')):
+                raise ValidationError("OTP Token is invalid.", code='authorization')
         attrs['user'] = user
         return attrs
+
+
+class TOTPDeviceSerializer(serializers.Serializer):
+    pass
+
+
+class UIDataSerializer(serializers.Serializer):
+    data = serializers.JSONField()
+
+    class Meta:
+        fields = ['data']
+
+
+class SupportSerializer(serializers.Serializer):
+    recaptcha_code = serializers.CharField(label="recaptcha code")
+    name = serializers.CharField(required=False)
+    email = serializers.EmailField()
+    subject = serializers.CharField(required=False)
+    message = serializers.CharField()
+
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
+    def validate_recaptcha_code(self, value):
+        if not utils.verify_recaptcha(value):
+            raise ValidationError("please verify recaptcha code")
+
+    class Meta:
+        field = '__all__'
