@@ -13,17 +13,18 @@ from django.contrib.auth.models import User
 from django.test.client import RequestFactory
 from rest_framework.test import APIClient
 from django.utils import timezone
-from mock import patch, call
+from mock import patch, call, mock_open
 from rest_framework import status
 from django.conf import settings
 
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
-    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo
+    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, TokenAuth as Token
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
 from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction,\
     get_ergo_price, periodic_verify_blocks
 from core.utils import RewardAlgorithm, get_miner_payment_address
-
+from core.views import TOTPDeviceViewSet
+from django_otp.plugins.otp_totp.models import TOTPDevice
 
 def random_string(length=10):
     """Generate a random string of fixed length """
@@ -488,7 +489,7 @@ class PropFunctionTest(TestCase):
         :return:
         """
         reward = RewardAlgorithm.get_instance().get_reward_to_share()
-        Configuration.objects.create(key='FEE_FACTOR', value=str(10e9 / reward))
+        Configuration.objects.filter(key='FEE_FACTOR').update(value=str(10e9 / reward))
         share = self.shares[14]
         self.prop(share)
         balances = self.get_share_balance(share)
@@ -636,6 +637,53 @@ class UserApiTestCase(TestCase):
                                  created_at=self.now + timedelta(minutes=5), difficulty=67890987),
         ]
 
+        # base time for actions hash_rate and share
+        time = datetime(2020, 1, 1, 8, 0, 20, 395985, tzinfo=timezone.utc)
+        # create miner for actions hash_rate, share, income
+        self.miner_actions = Miner.objects.create(public_key='hash', nick_name='hash')
+        # Create shares for actions hash_rate, share, income 
+        shares_actions = [
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
+                                 difficulty=1000, block_height=1006),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
+                                 difficulty=98761234, block_height=1005),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="valid",
+                                 difficulty=54329876, block_height=1004),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="invalid",
+                                 difficulty=1000, block_height=1003),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
+                                 difficulty=1234504321, block_height=1002),
+            Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
+                                 difficulty=67890987, block_height=1001),
+        ]
+        # Set timestamp for create_at shares
+        for i, share in enumerate(shares_actions):
+            if i == 1:
+                share.created_at = time - timedelta(hours=6)
+            else:
+                share.created_at = time + timedelta(minutes=i)
+            share.save()
+        # Create balances for action income
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[0], balance=100, status="immature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[1], balance=200, status="immature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[1], balance=300, status="mature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[2], balance=300, status="mature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[4], balance=500, status="mature")
+        Balance.objects.create(miner=self.miner_actions, share=shares_actions[5], balance=600, status="mature")
+
+        balance_actions = [
+            Balance.objects.create(miner=self.miner_actions, balance=-400, status="withdraw", max_height=1234),
+            Balance.objects.create(miner=self.miner_actions, balance=-600, status="withdraw", max_height=1235),
+            Balance.objects.create(miner=self.miner_actions, balance=-200, status="withdraw", max_height=1236),
+        ]
+        # Set timestamp for create_at shares
+        for i, balance in enumerate(balance_actions):
+            if i == 1:
+                balance.created_at = time - timedelta(days=4)
+            else:
+                balance.created_at = time - timedelta(hours=i)
+            balance.save()
+
         # Create balances
         Balance.objects.create(miner=cur_miners[0], share=shares[0], balance=100, status="immature")
         Balance.objects.create(miner=cur_miners[0], share=shares[1], balance=200, status="immature")
@@ -649,6 +697,120 @@ class UserApiTestCase(TestCase):
 
     def get_withdraw_url(self, pk):
         return urljoin(urljoin('/user/', pk) + '/', 'withdraw') + '/'
+
+    def get_hash_rate_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'hash_rate') + '/'
+
+    def get_share_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'share') + '/'
+
+    def get_income_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'income') + '/'
+
+    def get_payout_url(self, pk):
+        return urljoin(urljoin('/user/', pk) + '/', 'payout') + '/'
+
+    def mocked_time(*args, **kwargs):
+        return datetime(2020, 1, 1, 8, 59, 20, 395985, tzinfo=timezone.utc)
+
+    @override_settings(DEFAULT_START_PAYOUT=1577577600)
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_payout_default_value(self, mock_time):
+        """
+        In this case checking ordering according to date and payout for miner hash with default value
+        :param mock_time:
+        :return:
+        """
+        response = self.client.get(self.get_payout_url('hash')).json()
+        with open("core/data_testing/user_payout_default_value.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    @override_settings(DEFAULT_START_PAYOUT=1577577600)
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_payout_with_filter(self, mock_time):
+        """
+        In this case checking ordering according to amount and payout for miner hash with filter start and stop
+        :param mock_time:
+        :return:
+        """
+        data = {
+            'start': 1577520020,
+            'stop': 1577869160,
+            'ordering': '-amount'
+        }
+        response = self.client.get(self.get_payout_url('hash'), data=data).json()
+        with open("core/data_testing/user_payout_with_filter.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    def test_income(self):
+        """
+        We expect to get list income of the user abc
+        :return:
+        """
+        response = self.client.get(self.get_income_url('hash')).json()
+        with open("core/data_testing/user_income.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_share_default_value(self, mock_time):
+        """
+        In this scenario we expect with call action share for a user get number of valid and invalid between
+        timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_DIAGRAM and timezone.now().timestamp()
+         in half-hour intervals
+        :return:
+        """
+        response = self.client.get(self.get_share_url('hash')).json()
+        with open("core/data_testing/user_share_default_value.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_share_with_filter(self, mock_time):
+        """
+        In this scenario we expect with call action share for a user, get number of valid and invalid shares between
+         start and stop filter query in half-hour intervals
+        :return:
+        """
+        data = {
+            "start": 1577858420,
+            "stop": 1577869220
+        }
+        response = self.client.get(self.get_share_url('hash'), data).json()
+        with open("core/data_testing/user_share_with_filter.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_hash_rate_default_value(self, mock_time):
+        """
+        In this scenario we expect call action hash_rate for a user and get average and current hash_rate between
+         timezone.now().timestamp() - DEFAULT_STOP_TIME_STAMP_DIAGRAM and timezone.now().timestamp()
+         in half-hour intervals
+        :return:
+        """
+        response = self.client.get(self.get_hash_rate_url('hash')).json()
+        with open("core/data_testing/user_hash_rate_default_value.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_hash_rate_with_filter(self, mock_time):
+        """
+        In this scenario we expect call action hash_rate for a user and get average and current hash_rate between
+         start and stop filter query in half-hour intervals
+        :return:
+        """
+        data = {
+            "start": 1577858420,
+            "stop": 1577869220
+        }
+        response = self.client.get(self.get_hash_rate_url('hash'), data).json()
+        with open("core/data_testing/user_hash_rate_with_filter.json", "r") as read_file:
+            file = json.load(read_file)
+        self.assertEqual(file, response)
 
     def test_miner_not_specified_threshold_valid(self):
         """
@@ -889,6 +1051,9 @@ class UserApiTestCase(TestCase):
             }
         }
         """
+
+        self.miner_actions.delete()
+
         for miner in self.miners:
             miner.delete()
 
@@ -3270,3 +3435,318 @@ class AdministratorUserTestCase(TestCase):
 
         self.assertEqual(response, ['Filter range for last_ip is invalid.'])
 
+
+time_now = [timezone.now()]
+
+
+class LoginTestCase(TransactionTestCase):
+    reset_sequences = True
+    TIME = time_now
+    DEVICE_CONFIG = getattr(settings, "DEVICE_CONFIG")
+    DEFAULT_TOKEN_EXPIRE = getattr(settings, 'DEFAULT_TOKEN_EXPIRE')
+
+    def mocked_verify_recaptcha(*args, **kwargs):
+        return {'success': True}
+
+    def mocked_verify_token(*args, **kwargs):
+        if args[0] == '1234':
+            return True
+        if args[0] == '4321':
+            return False
+
+    def mocked_time(*args, **kwargs):
+        return time_now[0]
+
+    @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
+    def test_valid_first_login(self, mock_verify_recaptcha):
+        """
+        In this scenario check first login for, getting token with out otp_token.
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # Call route /login/
+        response = self.client.post('/login/', data={
+            'username': 'test',
+            'password': 'test',
+            'recaptcha_code': 'abcd'
+        }).json()
+        # Check generate token
+        token = Token.objects.filter(user=user).first()
+        self.assertEqual(token.key, response['token'])
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
+    def test_valid_second_login_expired_token(self, mock_verify_recaptcha, mock_time):
+        """
+        In this scenario we expect after expire token with login user delete last token and create new token for user.
+        :param mock_verify_recaptcha:
+        :param mock_time:
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # Create token for above user
+        token = Token.objects.create(user=user)
+        token = token.key
+        # Forward time to size DEFAULT_TOKEN_EXPIRE['PER_USE'] ( The token has now expired )
+        self.TIME[0] = timezone.now() + timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['PER_USE'])
+        # Call route /login/
+        response = self.client.post('/login/', data={
+            'username': 'test',
+            'password': 'test',
+            'recaptcha_code': 'abcd'
+        }).json()
+        self.assertNotEqual(token, response['token'])
+
+    @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
+    def test_login_with_OTP_device_empty_otp_toekn(self, mock_verify_recaptcha):
+        """
+        if a user have OTP-Device should be enter otp-token
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create device for this user
+        device_config = self.DEVICE_CONFIG.copy()
+        device_config.update({'user': user, 'name': user.username, 'confirmed': True})
+        TOTPDevice.objects.create(**device_config)
+        # Call route /login/ for the time being device created for user should be enter OTP-token
+        response = self.client.post('/login/', data={
+            'username': 'test',
+            'password': 'test',
+            'recaptcha_code': 'abcd'
+        }).json()
+        self.assertEqual(response, {
+            'non_field_errors': ['For this user, Two-Step verification is active so OTP Token is required.']
+        })
+
+    @patch('django_otp.plugins.otp_totp.models.TOTPDevice.verify_token', side_effect=mocked_verify_token)
+    @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
+    def test_login_with_OTP_device_valid(self, mock_verify_recaptcha, mock_TOTP_verify):
+        """
+        OTP-Token is valid should be return a token in response
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create device for this user
+        device_config = self.DEVICE_CONFIG.copy()
+        device_config.update({'user': user, 'name': user.username, 'confirmed': True})
+        TOTPDevice.objects.create(**device_config)
+        # Call route /login/ for the time being device created for user should be enter OTP-token
+        response = self.client.post('/login/', data={
+            'username': 'test',
+            'password': 'test',
+            'recaptcha_code': 'abcd',
+            'otp_token': '1234'
+        }).json()
+        token = Token.objects.filter(user=user).first()
+        self.assertEqual(token.key, response['token'])
+
+    @patch('django_otp.plugins.otp_totp.models.TOTPDevice.verify_token', side_effect=mocked_verify_token)
+    @patch('core.utils.verify_recaptcha', side_effect=mocked_verify_recaptcha)
+    def test_login_with_OTP_device_invalid(self, mock_verify_recaptcha, mock_TOTP_verify):
+        """
+        In this scenario checking OTP-Token, that is invalid.
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create device for this user
+        device_config = self.DEVICE_CONFIG.copy()
+        device_config.update({'user': user, 'name': user.username, 'confirmed': True})
+        TOTPDevice.objects.create(**device_config)
+        # checking OTP-Token that is invalid.
+        response = self.client.post('/login/',
+                                    data={
+                                        'username': 'test',
+                                        'password': 'test',
+                                        'recaptcha_code': 'abcd',
+                                        'otp_token': '4321'
+                                    }).json()
+        self.assertEqual(response, {'non_field_errors': ['OTP Token is invalid.']})
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_login_with_expire_token_per_use(self, mock):
+        """
+        In this scenario checking expired token after passing DEFAULT_TOKEN_EXPIRE from last use user this token.
+        :param mock:
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # Create token for above user
+        token = Token.objects.create(user=user)
+        # Set token for send request
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        # Call a request that need Token authenticate
+        response = client.post('/totp/')
+        self.assertEqual(response.status_code, 201)
+        # Take time forward to one day later
+        self.TIME[0] = timezone.now() + timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['PER_USE'])
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        response = client.post('/totp/')
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {'detail': 'Expired token.'})
+
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    def test_login_with_expire_token_TOTAL(self, mock):
+        """
+        In this scenario we want checking expired token after passing DEFAULT_TOKEN_EXPIRE['TOTAL'] from created token.
+        :param mock:
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # Create token for above user
+        token = Token.objects.create(user=user)
+        # Set token for send request
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        # Call a request that need Token authenticate
+        response = client.post('/totp/')
+        self.assertEqual(response.status_code, 201)
+        # We take the time forward as much as DEFAULT_TOKEN_EXPIRE['TOTAL']
+        self.TIME[0] = timezone.now() + timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['TOTAL'])
+        # Update last_use token to half a day after now time
+        token.last_use = timezone.now() + timedelta(seconds=(self.DEFAULT_TOKEN_EXPIRE['TOTAL'] - 9.5 * 24 * 60 * 60))
+        token.save()
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        response = client.post('/totp/')
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {'detail': 'Expired token.'})
+
+
+class TOTPTestCase(TransactionTestCase):
+    reset_sequences = True
+    DEVICE_CONFIG = getattr(settings, "DEVICE_CONFIG")
+
+    def test_QR_first_device(self):
+        """
+        In this scenario checking route /totp/ for create TOTP-device in first time,
+        after that checking QR-Code generated of this route equal with QR-Code of device
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create token for this user
+        token, created = Token.objects.get_or_create(user=user)
+        # Create TOTP-Device with route /totp/
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        response = client.post('/totp/').json()
+        # Check create device for this user
+        device = TOTPDevice.objects.filter(user=user).first()
+        self.assertIsNotNone(device)
+        qrcode_1 = TOTPDeviceViewSet.get_qr_code(device.config_url)
+        # checking QR-Code for this device equals to the response of this route or no
+        self.assertEqual(qrcode_1, response['qrcode'])
+
+    def test_second_device(self):
+        """
+         In this scenario checking with call route /totp/ for user that have device should be
+         generate a new device instead of last device, with create a TOTP-Device for user.
+        :return:
+        """
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='test', password='test')
+        # create token for this user
+        token, created = Token.objects.get_or_create(user=user)
+        # create device for this user
+        device_config = self.DEVICE_CONFIG.copy()
+        device_config.update({'user': user, 'name': user.username, 'confirmed': True})
+        device = TOTPDevice.objects.create(**device_config)
+        # Create TOTP-Device with route /totp/
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        # Check reload new secret key for this device when device exist.
+        response = client.post('/totp/').json()
+        qrcode = TOTPDeviceViewSet.get_qr_code(device.config_url)
+        self.assertNotEqual(qrcode, response['qrcode'])
+
+
+class UIDataTestCase(TransactionTestCase):
+    reset_sequences = True
+    DEFAULT_UI_PREFIX_DIRECTORY = getattr(settings, 'DEFAULT_UI_PREFIX_DIRECTORY')
+
+    def setUp(self):
+        # Create User
+        self.factory = RequestFactory()
+        user = User.objects.create_user(username='x', password='y')
+        # Create token for above user
+        token = Token.objects.create(user=user)
+        self.token = token
+
+    @patch("builtins.open", new_callable=mock_open)
+    def test_patch_get(self, mock_file):
+        self.client.get('/ui/test/about/', **{'HTTP_source-ip': '127.0.0.1'}).json()
+        mock_file.assert_called_with(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, 'test/about'), 'r')
+
+    @patch("os.makedirs")
+    @patch("builtins.open", new_callable=mock_open)
+    def test_patch_post(self, mock_file, mock_make_dir):
+        # Set token for send request
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION='Token ' + self.token.key)
+        client.post(path='/ui/test/about/', data=json.dumps({
+            "data": {
+                "test": "test"
+            }
+        }), content_type='application/json', **{'HTTP_source-ip': '127.0.0.1'})
+        mock_file.assert_called_with(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, 'test/about'), 'w')
+        mock_make_dir.assert_called_with(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, 'test'), mode=0o750, exist_ok=True)
+
+
+class TestSupport(TestCase):
+    """
+    Test scenario get support information and check recaptcha code and send with email to admin system
+    """
+    RECAPTCHA_SITE_KEY = getattr(settings, 'RECAPTCHA_SITE_KEY')
+    SENDER_EMAIL_ADDRESS = getattr(settings, 'SENDER_EMAIL_ADDRESS')
+    RECEIVERS_EMAIL_ADDRESS = getattr(settings, 'RECEIVERS_EMAIL_ADDRESS')
+
+    def mock_send_mail(*args, **kwargs):
+        raise TypeError
+
+    def test_send_email_support_get(self):
+        """
+        in this test should be get RECAPTCHA_SITE_KEY
+        :return:
+        """
+        response = self.client.get('/support/').json()
+        self.assertEqual(response.get('site_key'), self.RECAPTCHA_SITE_KEY)
+
+    @patch('core.utils.verify_recaptcha', return_value={'success': True})
+    @patch('core.tasks.send_support_email.delay')
+    def test_send_email_support_post(self, mock_mail, mock_recaptcha):
+        """
+        In this test case should be send information of form support and get message ok with status_code 200
+        :param mock_mail:
+        :param mock_recaptcha:
+        :return:
+        """
+        data = {
+            "recaptcha_code": "test",
+            "name": "Alex Chepurnoy",
+            "email": "test@ergopool.io",
+            "subject": "Problem Config Config proxy",
+            "message": "Please, Help."
+        }
+        response = self.client.post('/support/', data=data, content_type="application/json")
+        message = "Name: %s\nEmail: %s\nMessage: %s" % (data.get('name'), data.get('email'), data.get('message'))
+        mock_mail.assert_has_calls([call(data.get('subject'), message)])
+        self.assertEqual(response.json().get('status'), ['ok'])
+        self.assertEqual(response.status_code, 200)
