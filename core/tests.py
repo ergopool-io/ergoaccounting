@@ -90,6 +90,7 @@ class ShareTestCase(TestCase):
                 'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': [],
+                'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
@@ -110,6 +111,7 @@ class ShareTestCase(TestCase):
                 'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': [],
+                'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
@@ -129,6 +131,7 @@ class ShareTestCase(TestCase):
                 'status': 'valid',
                 "block_height": 40404,
                 'next_ids': [],
+                'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
@@ -149,6 +152,7 @@ class ShareTestCase(TestCase):
                 "block_height": 40404,
                 'parent_id': 'test',
                 'next_ids': [],
+                'client_ip': '127.0.0.5',
                 'difficulty': 123456}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
@@ -215,6 +219,25 @@ class ShareTestCase(TestCase):
         self.assertTrue(Share.objects.filter(parent_id='test').exists())
         self.assertTrue(MinerIP.objects.filter(ip='127.0.0.1').exists())
 
+    def test_valid_share_without_block_height(self):
+        """
+        test if a valid share submitted without block height no solution must store in database
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '1',
+                'nonce': '1',
+                'status': 'valid',
+                'parent_id': 'test',
+                'next_ids': [],
+                'client_ip': '127.0.0.5',
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        self.assertFalse(Share.objects.filter(share=share).exists())
+
     def test_miner_ip_exist(self):
         """
         test if a ip of miner exist should be update timestamp to updated_at
@@ -266,7 +289,7 @@ class ShareTestCase(TestCase):
 
     def test_validate_unsolved_share_update_last_used(self):
         """
-        test if a non-solution submitted share must store with None in transaction_id and block_height
+        test if a non-solution submitted share must store with None in transaction_id
         addresses are present, last_used field must be updated
         """
         miner_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
@@ -293,7 +316,6 @@ class ShareTestCase(TestCase):
         self.assertEqual(Share.objects.filter(share=share).count(), 1)
         transaction = Share.objects.filter(share=share).first()
         self.assertIsNone(transaction.transaction_id)
-        self.assertIsNone(transaction.block_height)
         self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
                                                 category='miner').count(), 1)
         self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
