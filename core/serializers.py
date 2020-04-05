@@ -49,16 +49,11 @@ class ShareSerializer(serializers.ModelSerializer):
             if not attrs.get("transaction_id"):
                 logger.error('Transaction id is not provided for solved share.')
                 raise serializers.ValidationError("transaction id is required when solved solution received")
-            if not attrs.get("block_height"):
-                logger.error('Block height is not provided for solved share.')
-                raise serializers.ValidationError("block height is required when solved solution received")
         else:
             if 'transaction_id' in attrs:
                 del attrs['transaction_id']
-            if 'block_height' in attrs:
-                del attrs['block_height']
 
-        # in status of solved or valid parent_id and next parameters is required
+        # in status of solved or valid parent_id and next and block_height parameters is required
         if attrs.get("status") == 'solved' or attrs.get("status") == 'valid':
             if not attrs.get("parent_id"):
                 logger.error('parent id is not provided for solved share.')
@@ -66,11 +61,16 @@ class ShareSerializer(serializers.ModelSerializer):
             if not attrs.get("path"):
                 logger.error('path is not provided for solved or valid share.')
                 raise serializers.ValidationError("path is required when solved or valid solution received")
+            if not attrs.get("block_height"):
+                logger.error('Block height is not provided for solved or valid share.')
+                raise serializers.ValidationError("block height is required when solved or valid solution received")
         else:
             if 'parent_id' in attrs:
                 del attrs['parent_id']
             if 'path' in attrs:
                 del attrs['path']
+            if 'block_height' in attrs:
+                del attrs['block_height']
 
         return attrs
 
