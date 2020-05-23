@@ -18,10 +18,11 @@ class AggregateShareSerializer(serializers.ModelSerializer):
 
 class ShareSerializer(serializers.ModelSerializer):
     miner = serializers.CharField()
-    miner_address = serializers.CharField(required=False)
-    lock_address = serializers.CharField(required=False)
-    withdraw_address = serializers.CharField(required=False)
-    difficulty = serializers.IntegerField()
+    miner_address = serializers.CharField(allow_null=True)
+    lock_address = serializers.CharField(allow_null=True)
+    withdraw_address = serializers.CharField(allow_null=True)
+    parent_id = serializers.CharField(allow_null=True)
+    difficulty = serializers.IntegerField(allow_null=True)
     client_ip = serializers.IPAddressField(allow_blank=True, write_only=True)
 
     def create(self, validated_data):
@@ -43,9 +44,6 @@ class ShareSerializer(serializers.ModelSerializer):
         :return:
         """
         if attrs.get("status") == 'solved':
-            if not attrs.get("pow_identity"):
-                logger.error('pow_identity field must be present for solved shares.')
-                raise serializers.ValidationError("pow_identity field must be present for solved shares.")
             if not attrs.get("transaction_id"):
                 logger.error('Transaction id is not provided for solved share.')
                 raise serializers.ValidationError("transaction id is required when solved solution received")
@@ -55,8 +53,11 @@ class ShareSerializer(serializers.ModelSerializer):
 
         # in status of solved or valid parent_id and next and block_height parameters is required
         if attrs.get("status") == 'solved' or attrs.get("status") == 'valid':
+            if not attrs.get("pow_identity"):
+                logger.error('pow_identity is not provided for solved or valid share.')
+                raise serializers.ValidationError("pow_identity is required when solved or valid solution received")
             if not attrs.get("parent_id"):
-                logger.error('parent id is not provided for solved share.')
+                logger.error('parent id is not provided for solved or valid share.')
                 raise serializers.ValidationError("parent id is required when solved or valid solution received")
             if not attrs.get("path"):
                 logger.error('path is not provided for solved or valid share.')
@@ -64,6 +65,18 @@ class ShareSerializer(serializers.ModelSerializer):
             if not attrs.get("block_height"):
                 logger.error('Block height is not provided for solved or valid share.')
                 raise serializers.ValidationError("block height is required when solved or valid solution received")
+            if not attrs.get("difficulty"):
+                logger.error('difficulty is not provided for solved or valid share.')
+                raise serializers.ValidationError("difficulty is required when solved or valid solution received")
+            if not attrs.get("miner_address"):
+                logger.error('miner_address is not provided for solved or valid share.')
+                raise serializers.ValidationError("miner_address is required when solved or valid solution received")
+            if not attrs.get("lock_address"):
+                logger.error('lock_address is not provided for solved or valid share.')
+                raise serializers.ValidationError("lock_address is required when solved or valid solution received")
+            if not attrs.get("withdraw_address"):
+                logger.error('withdraw_address is not provided for solved or valid share.')
+                raise serializers.ValidationError("withdraw_address is required when solved or valid solution received")
         else:
             if 'parent_id' in attrs:
                 del attrs['parent_id']
@@ -71,6 +84,16 @@ class ShareSerializer(serializers.ModelSerializer):
                 del attrs['path']
             if 'block_height' in attrs:
                 del attrs['block_height']
+            if 'difficulty' in attrs:
+                del attrs['difficulty']
+            if 'lock_address' in attrs:
+                del attrs['lock_address']
+            if 'withdraw_address' in attrs:
+                del attrs['withdraw_address']
+            if 'miner_address' in attrs:
+                del attrs['miner_address']
+            if 'pow_identity' in attrs:
+                del attrs['pow_identity']
 
         return attrs
 
