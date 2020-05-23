@@ -186,17 +186,21 @@ class ShareTestCase(TestCase):
         """
         share = uuid.uuid4().hex
         data = {"share": share,
-                'miner': '1',
-                'nonce': '1',
+                "miner": "1",
+                "nonce": "1",
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
-                'status': 'solved',
-                'pow_identity': "test",
-                'parent_id': 'test',
-                'next_ids': ['test'],
-                'client_ip': '127.0.0.5',
-                'path': '-1',
-                'difficulty': 123456}
+                "status": "solved",
+                "pow_identity": "test",
+                "parent_id": "test",
+                "next_ids": ["test"],
+                "client_ip": "127.0.0.5",
+                "path": "-1",
+                "difficulty": 123456,
+                "withdraw_address": "test",
+                "miner_address": "test",
+                "lock_address": "test"
+                }
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
 
@@ -310,7 +314,8 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.1',
                 'path': '-1',
                 'status': 'valid',
-                'difficulty': 123456}
+                'difficulty': 123456,
+                "pow_identity": "test"}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertEqual(Share.objects.filter(share=share).count(), 1)
@@ -325,11 +330,11 @@ class ShareTestCase(TestCase):
                                    category='withdraw').count(), 1)
         self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
                                                category='miner').first().last_used > miner_last_used)
-        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
-                                               category='lock').first().last_used > lock_last_used)
-        self.assertTrue(
+        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
+                                                category='lock').first().last_used, lock_last_used)
+        self.assertEqual(
             Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
-                                   category='withdraw').first().last_used > withdraw_last_used)
+                                   category='withdraw').first().last_used, withdraw_last_used)
 
     def test_validate_invalid_share_do_not_update_last_used(self):
         """
@@ -346,15 +351,9 @@ class ShareTestCase(TestCase):
         share = uuid.uuid4().hex
         data = {'share': share,
                 'miner': '2',
-                'nonce': '1',
-                "transaction_id": "this is a transaction id",
-                "block_height": 40404,
-                'parent_id': 'test',
-                'next_ids': [],
                 'client_ip': '127.0.0.1',
-                'path': '-1',
-                'status': 'invalid',
-                'difficulty': 123456}
+                'status': 'invalid'
+                }
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],

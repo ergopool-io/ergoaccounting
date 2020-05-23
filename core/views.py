@@ -68,6 +68,7 @@ class ShareView(viewsets.GenericViewSet,
 
     def perform_create(self, serializer):
         """
+        TODO: Remove params lock_address and withdraw_address from scenario.
         in case any share is repetitious, regardles of being valid or invalid
         we must change the status to repetitious (status=4).
         :param serializer:
@@ -85,26 +86,54 @@ class ShareView(viewsets.GenericViewSet,
         if not rep_share:
             logger.info('New share, saving.')
             if _status in ["solved", "valid"]:
-                miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
-                                                              address_miner=miner, category='miner')[0]
-                lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
-                                                             address_miner=miner, category='lock')[0]
-                withdraw_address = \
-                    Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
-                                                  address_miner=miner, category='withdraw')[0]
+                miner_address, miner_created = Address.objects.get_or_create(
+                    address=serializer.validated_data.get('miner_address'),
+                    address_miner=miner, category='miner'
+                )
                 # updating updated_at field
                 miner_address.save()
-                lock_address.save()
-                withdraw_address.save()
-                serializer.save(miner=miner, withdraw_address=withdraw_address, miner_address=miner_address,
-                                lock_address=lock_address)
+                # Check if miner_address already existed, ignore create lock_address, withdraw_address.
+                if miner_created:
+                    lock_address, lock_created = \
+                        Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
+                                                      address_miner=miner,
+                                                      category='lock')
+                    # updating updated_at field
+                    lock_address.save()
+                    # Check if lock_address already existed, ignore create withdraw_address.
+                    if lock_created:
+                        withdraw_address, withdraw_created = \
+                            Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
+                                                          address_miner=miner,
+                                                          category='withdraw')
+                        # updating updated_at field
+                        withdraw_address.save()
+                        serializer.save(miner=miner, withdraw_address=withdraw_address, miner_address=miner_address,
+                                        lock_address=lock_address)
+                    else:
+                        serializer.save(miner=miner, withdraw_address=None, miner_address=miner_address,
+                                        lock_address=lock_address)
+                else:
+                    serializer.save(miner=miner, withdraw_address=None, miner_address=miner_address, lock_address=None)
 
             else:
                 serializer.save(miner=miner, withdraw_address=None, miner_address=None, lock_address=None)
 
         else:
             logger.info('Repetitious share, saving.')
-            serializer.save(status="repetitious", miner=miner)
+            if _status != 'invalid':
+                miner_address, miner_created = Address.objects.get_or_create(
+                    address=serializer.validated_data.get('miner_address'), address_miner=miner, category='miner')
+                # updating updated_at field
+                miner_address.save()
+                serializer.save(
+                    status="repetitious", miner=miner, withdraw_address=None, miner_address=miner_address,
+                    lock_address=None
+                )
+            else:
+                serializer.save(
+                    status="repetitious", miner=miner, withdraw_address=None, miner_address=None, lock_address=None
+                )
             _status = "repetitious"
         if _status == "solved":
             logger.info('Solved share, saving.')
@@ -730,7 +759,7 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         ordering_fields = ordering_fields + ['-' + i for i in ordering_fields]
         field = self.request.query_params.get('ordering')
         order = field if field in ordering_fields else self.ordering
-        # change query params to original ordering field 
+        # change query params to original ordering field
         if order in self.original_ordering:
             order = self.original_ordering[order]
 
