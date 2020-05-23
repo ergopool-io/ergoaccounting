@@ -136,7 +136,7 @@ class Share(models.Model):
     status = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
     transaction_id = models.CharField(max_length=80, blank=True, null=True)
     transaction_valid = models.BooleanField(blank=True, null=True)
-    difficulty = models.BigIntegerField(blank=False)
+    difficulty = models.BigIntegerField(blank=True, null=True)
     block_height = models.BigIntegerField(blank=True, null=True)
     parent_id = models.CharField(max_length=80, null=False, blank=False, default="0")
     next_ids = ArrayField(models.CharField(max_length=80, blank=True, null=True), blank=True, null=True, default=list)
