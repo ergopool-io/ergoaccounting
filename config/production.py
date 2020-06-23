@@ -124,6 +124,11 @@ app.conf.beat_schedule = {
         'schedule': parse_cron_tab(os.environ.get('PERIODIC_VERIFY_BLOCKS'), 300),
         'args': ()
     },
+    'periodic_calculate_hash_rate': {
+        'task': 'core.tasks.periodic_calculate_hash_rate',
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_CALCULATE_HASH_RATE'), 300),
+        'args': ()
+    },
 }
 
 # aggregate parameters, please set with a confidence threshold
@@ -151,6 +156,8 @@ DEFAULT_START_PAYOUT = 1000000000
 PERIOD_ACTIVE_MINERS_COUNT = 3600
 # count share in specific period 1-Day (second)
 TOTAL_PERIOD_COUNT_SHARE = 24 * 60 * 60
+# limit of getting block for calculate hash_rate periodic_task
+LIMIT_NUMBER_BLOCK = 50
 
 
 RECAPTCHA_SECRET = os.environ.get("RECAPTCHA_SECRET")

@@ -1,11 +1,11 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import blake2b
 from pathlib import Path
 from urllib.parse import urljoin
-import time
 
+from django.utils import timezone
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
@@ -13,11 +13,12 @@ from django.db.models import Q, Sum, Count, Max, Min
 from pycoingecko import CoinGeckoAPI
 
 from ErgoAccounting.celery import app
-from core.models import Miner, Balance, Configuration, Share, AggregateShare, ExtraInfo
+from core.models import Miner, Balance, Configuration, Share, AggregateShare, ExtraInfo, HashRate
 from core.utils import node_request, get_miner_payment_address, RewardAlgorithm
 
 logger = logging.getLogger(__name__)
 
+ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
 
 @app.task
 def periodic_withdrawal():
@@ -533,6 +534,59 @@ def periodic_verify_blocks():
     logger.info('bulk updating transaction_valid field of shares, len: {}.'.format(shares.count()))
     Share.objects.bulk_update(shares, ['transaction_valid'])
     logger.info('done verifying blocks.')
+
+
+@app.task
+def periodic_calculate_hash_rate():
+    """
+    A periodic task for calculate hash_rate of network in pool in Half-hour.
+    """
+    logger.info('running calculating hash rate task')
+    node_data = node_request('info')
+    if node_data['status'] != 'success':
+        logger.error('can not get info from node! exiting.')
+        return
+    to_height = int(node_data['response']['fullHeight'])
+    i = 1
+    network_difficulty = 0
+    time_period = timezone.now() - timedelta(seconds=settings.PERIOD_DIAGRAM)
+    # Calculate hash_rate of network with getting last block between now time and past PERIOD_DIAGRAM
+    time_flag = True
+    while time_flag:
+        # Get blocks from node with for calculate hash_rate in PERIOD_DIAGRAM
+        from_height = to_height - (settings.LIMIT_NUMBER_BLOCK * i)
+        node_data = node_request('blocks/chainSlice', params={
+            "fromHeight": from_height - 1,
+            "toHeight": to_height
+        })
+        if node_data['status'] != 'success':
+            logger.error("Can not resolve blocks from Node! exiting.")
+            return
+        items = list(node_data.get('response'))
+        if not items:
+            return
+        items.reverse()
+        for item in items:
+            # Check time stamp of blocks that there is in time_period
+            if time_period.timestamp() < (item['timestamp']/1000):
+                network_difficulty += int(item['difficulty'])
+            else:
+                time_flag = False
+        i += 1
+        to_height = from_height
+
+    # Calculate HashRate of pool
+    pool_difficulty = Share.objects.aggregate(sum_total_difficulty=Sum('difficulty', filter=Q(
+        created_at__gte=time_period
+    ) & Q(
+        status__in=['valid', 'solved']
+    )))
+    # Save hash_rate of network and pool between now time and past PERIOD_DIAGRAM
+    HashRate.objects.create(
+        network=int(network_difficulty / settings.PERIOD_DIAGRAM) or 1,
+        pool=int((pool_difficulty.get("sum_total_difficulty") or 0) / settings.PERIOD_DIAGRAM) or 1
+    )
+    logger.info('done calculating hash rate of pool and network.')
 
 
 @app.task(bind=True, max_retries=settings.NUMBER_OF_RETRIES_RUN_TASK)
