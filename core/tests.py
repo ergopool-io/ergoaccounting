@@ -18,10 +18,11 @@ from rest_framework import status
 from django.conf import settings
 
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
-    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, TokenAuth as Token
+    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE,\
+    Address, MinerIP, ExtraInfo, TokenAuth as Token, HashRate
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
 from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction,\
-    get_ergo_price, periodic_verify_blocks
+    get_ergo_price, periodic_verify_blocks, periodic_calculate_hash_rate
 from core.utils import RewardAlgorithm, get_miner_payment_address
 from core.views import TOTPDeviceViewSet
 from django_otp.plugins.otp_totp.models import TOTPDevice
@@ -3771,3 +3772,63 @@ class TestSupport(TestCase):
         mock_mail.assert_has_calls([call(data.get('subject'), message)])
         self.assertEqual(response.json().get('status'), ['ok'])
         self.assertEqual(response.status_code, 200)
+
+
+class TestPeriodicCalculateHashRate(TestCase):
+    """
+    Test periodic task for calculate hash_rate and save in data_base
+    """
+    def mocked_node_request(*args, **kwargs):
+        """
+        mock requests with method post
+        """
+        url = args[0]
+
+        if url == 'info':
+            return {
+                'response': {'fullHeight': 14975},
+                'status': 'success'
+            }
+        if url == 'blocks/chainSlice':
+            params = kwargs['params']
+            blocks = json.loads(open('core/data_testing/periodic_calculate_hash_rate_chain_slice.json').read())
+            output = []
+            for block in blocks:
+                if params['fromHeight'] < block['height'] <= params['toHeight']:
+                    output.append(block)
+            return {
+                'status': 'success',
+                'response': output
+            }
+
+        return {
+            'response': None,
+            'status': 'error'
+        }
+
+    def mocked_time(*args, **kwargs):
+        return datetime(2020, 6, 23, 7, 46, 0, 395985, tzinfo=timezone.utc)
+
+    def setUp(self):
+        # create miners lists
+        miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
+        # create shares list
+        [Share.objects.create(share=str(i), miner=miners[i % 3],
+                              status="solved" if i in [14, 34, 35] else "valid" if i % 2 == 0 else "invalid",
+                              difficulty=1000 * i+1) for i in range(36)]
+
+    @override_settings(LIMIT_NUMBER_BLOCK=2)
+    @override_settings(PERIOD_DIAGRAM=15 * 60)
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    def test_task(self, mock_node, mock_time):
+        """
+        Except for this test case calculate hash_rate of network and pool in PERIOD_DIAGRAM and save them in database
+        :param mock_node:
+        :param mock_time:
+        :return:
+        """
+        periodic_calculate_hash_rate()
+        hash_rate = HashRate.objects.last()
+        self.assertEqual(hash_rate.pool, 378.0)
+        self.assertEqual(hash_rate.network, 576.0)
