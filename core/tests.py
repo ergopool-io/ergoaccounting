@@ -18,10 +18,11 @@ from rest_framework import status
 from django.conf import settings
 
 from core.models import CONFIGURATION_KEY_CHOICE, AggregateShare, Share, Balance, Miner, Configuration, \
-    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE, Address, MinerIP, ExtraInfo, TokenAuth as Token
+    CONFIGURATION_DEFAULT_KEY_VALUE, CONFIGURATION_KEY_TO_TYPE,\
+    Address, MinerIP, ExtraInfo, TokenAuth as Token, HashRate
 from core.serializers import AggregateShareSerializer, BalanceSerializer, ShareSerializer
 from core.tasks import immature_to_mature, periodic_withdrawal, aggregate, generate_and_send_transaction,\
-    get_ergo_price, periodic_verify_blocks
+    get_ergo_price, periodic_verify_blocks, periodic_calculate_hash_rate
 from core.utils import RewardAlgorithm, get_miner_payment_address
 from core.views import TOTPDeviceViewSet
 from django_otp.plugins.otp_totp.models import TOTPDevice
@@ -90,6 +91,7 @@ class ShareTestCase(TestCase):
                 'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': [],
+                'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
@@ -110,6 +112,7 @@ class ShareTestCase(TestCase):
                 'pow_identity': "test",
                 'parent_id': 'test',
                 'next_ids': [],
+                'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
@@ -129,6 +132,7 @@ class ShareTestCase(TestCase):
                 'status': 'valid',
                 "block_height": 40404,
                 'next_ids': [],
+                'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
         data.update(self.addresses)
@@ -149,6 +153,7 @@ class ShareTestCase(TestCase):
                 "block_height": 40404,
                 'parent_id': 'test',
                 'next_ids': [],
+                'client_ip': '127.0.0.5',
                 'difficulty': 123456}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
@@ -182,17 +187,21 @@ class ShareTestCase(TestCase):
         """
         share = uuid.uuid4().hex
         data = {"share": share,
-                'miner': '1',
-                'nonce': '1',
+                "miner": "1",
+                "nonce": "1",
                 "transaction_id": "this is a transaction id",
                 "block_height": 40404,
-                'status': 'solved',
-                'pow_identity': "test",
-                'parent_id': 'test',
-                'next_ids': ['test'],
-                'client_ip': '127.0.0.5',
-                'path': '-1',
-                'difficulty': 123456}
+                "status": "solved",
+                "pow_identity": "test",
+                "parent_id": "test",
+                "next_ids": ["test"],
+                "client_ip": "127.0.0.5",
+                "path": "-1",
+                "difficulty": 123456,
+                "withdraw_address": "test",
+                "miner_address": "test",
+                "lock_address": "test"
+                }
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
 
@@ -214,6 +223,25 @@ class ShareTestCase(TestCase):
         self.assertTrue(Share.objects.filter(share=share).exists())
         self.assertTrue(Share.objects.filter(parent_id='test').exists())
         self.assertTrue(MinerIP.objects.filter(ip='127.0.0.1').exists())
+
+    def test_valid_share_without_block_height(self):
+        """
+        test if a valid share submitted without block height no solution must store in database
+        :return:
+        """
+        share = uuid.uuid4().hex
+        data = {'share': share,
+                'miner': '1',
+                'nonce': '1',
+                'status': 'valid',
+                'parent_id': 'test',
+                'next_ids': [],
+                'client_ip': '127.0.0.5',
+                'path': '-1',
+                'difficulty': 123456}
+        data.update(self.addresses)
+        self.client.post('/shares/', data, format='json')
+        self.assertFalse(Share.objects.filter(share=share).exists())
 
     def test_miner_ip_exist(self):
         """
@@ -266,7 +294,7 @@ class ShareTestCase(TestCase):
 
     def test_validate_unsolved_share_update_last_used(self):
         """
-        test if a non-solution submitted share must store with None in transaction_id and block_height
+        test if a non-solution submitted share must store with None in transaction_id
         addresses are present, last_used field must be updated
         """
         miner_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
@@ -287,13 +315,13 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.1',
                 'path': '-1',
                 'status': 'valid',
-                'difficulty': 123456}
+                'difficulty': 123456,
+                "pow_identity": "test"}
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertEqual(Share.objects.filter(share=share).count(), 1)
         transaction = Share.objects.filter(share=share).first()
         self.assertIsNone(transaction.transaction_id)
-        self.assertIsNone(transaction.block_height)
         self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
                                                 category='miner').count(), 1)
         self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
@@ -303,11 +331,11 @@ class ShareTestCase(TestCase):
                                    category='withdraw').count(), 1)
         self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
                                                category='miner').first().last_used > miner_last_used)
-        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
-                                               category='lock').first().last_used > lock_last_used)
-        self.assertTrue(
+        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
+                                                category='lock').first().last_used, lock_last_used)
+        self.assertEqual(
             Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
-                                   category='withdraw').first().last_used > withdraw_last_used)
+                                   category='withdraw').first().last_used, withdraw_last_used)
 
     def test_validate_invalid_share_do_not_update_last_used(self):
         """
@@ -324,15 +352,9 @@ class ShareTestCase(TestCase):
         share = uuid.uuid4().hex
         data = {'share': share,
                 'miner': '2',
-                'nonce': '1',
-                "transaction_id": "this is a transaction id",
-                "block_height": 40404,
-                'parent_id': 'test',
-                'next_ids': [],
                 'client_ip': '127.0.0.1',
-                'path': '-1',
-                'status': 'invalid',
-                'difficulty': 123456}
+                'status': 'invalid'
+                }
         data.update(self.addresses)
         self.client.post('/shares/', data, format='json')
         self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
@@ -3750,3 +3772,63 @@ class TestSupport(TestCase):
         mock_mail.assert_has_calls([call(data.get('subject'), message)])
         self.assertEqual(response.json().get('status'), ['ok'])
         self.assertEqual(response.status_code, 200)
+
+
+class TestPeriodicCalculateHashRate(TestCase):
+    """
+    Test periodic task for calculate hash_rate and save in data_base
+    """
+    def mocked_node_request(*args, **kwargs):
+        """
+        mock requests with method post
+        """
+        url = args[0]
+
+        if url == 'info':
+            return {
+                'response': {'fullHeight': 14975},
+                'status': 'success'
+            }
+        if url == 'blocks/chainSlice':
+            params = kwargs['params']
+            blocks = json.loads(open('core/data_testing/periodic_calculate_hash_rate_chain_slice.json').read())
+            output = []
+            for block in blocks:
+                if params['fromHeight'] < block['height'] <= params['toHeight']:
+                    output.append(block)
+            return {
+                'status': 'success',
+                'response': output
+            }
+
+        return {
+            'response': None,
+            'status': 'error'
+        }
+
+    def mocked_time(*args, **kwargs):
+        return datetime(2020, 6, 23, 7, 46, 0, 395985, tzinfo=timezone.utc)
+
+    def setUp(self):
+        # create miners lists
+        miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
+        # create shares list
+        [Share.objects.create(share=str(i), miner=miners[i % 3],
+                              status="solved" if i in [14, 34, 35] else "valid" if i % 2 == 0 else "invalid",
+                              difficulty=1000 * i+1) for i in range(36)]
+
+    @override_settings(LIMIT_NUMBER_BLOCK=2)
+    @override_settings(PERIOD_DIAGRAM=15 * 60)
+    @patch('django.utils.timezone.now', side_effect=mocked_time)
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    def test_task(self, mock_node, mock_time):
+        """
+        Except for this test case calculate hash_rate of network and pool in PERIOD_DIAGRAM and save them in database
+        :param mock_node:
+        :param mock_time:
+        :return:
+        """
+        periodic_calculate_hash_rate()
+        hash_rate = HashRate.objects.last()
+        self.assertEqual(hash_rate.pool, 378.0)
+        self.assertEqual(hash_rate.network, 576.0)

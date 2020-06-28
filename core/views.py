@@ -1,11 +1,9 @@
 import logging
 from datetime import datetime, timedelta
 from pydoc import locate
-from urllib.parse import urljoin
 import json
 
 import django_filters as filters_rest
-import requests
 from django.conf import settings
 from django.db.models import Q, Count, Sum, Max, Min
 from django.db.utils import DataError
@@ -26,7 +24,7 @@ from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFA
     TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
 from core.authentication import CustomPermission, ReadOnlyCustomPermission, ExpireTokenAuthentication
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token
+    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token, HashRate
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
     ErgoAuthTokenSerializer, TOTPDeviceSerializer, UIDataSerializer, SupportSerializer
 from core.tasks import generate_and_send_transaction, send_support_email
@@ -68,6 +66,7 @@ class ShareView(viewsets.GenericViewSet,
 
     def perform_create(self, serializer):
         """
+        TODO: Remove params lock_address and withdraw_address from scenario.
         in case any share is repetitious, regardles of being valid or invalid
         we must change the status to repetitious (status=4).
         :param serializer:
@@ -85,26 +84,54 @@ class ShareView(viewsets.GenericViewSet,
         if not rep_share:
             logger.info('New share, saving.')
             if _status in ["solved", "valid"]:
-                miner_address = Address.objects.get_or_create(address=serializer.validated_data.get('miner_address'),
-                                                              address_miner=miner, category='miner')[0]
-                lock_address = Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
-                                                             address_miner=miner, category='lock')[0]
-                withdraw_address = \
-                    Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
-                                                  address_miner=miner, category='withdraw')[0]
+                miner_address, miner_created = Address.objects.get_or_create(
+                    address=serializer.validated_data.get('miner_address'),
+                    address_miner=miner, category='miner'
+                )
                 # updating updated_at field
                 miner_address.save()
-                lock_address.save()
-                withdraw_address.save()
-                serializer.save(miner=miner, withdraw_address=withdraw_address, miner_address=miner_address,
-                                lock_address=lock_address)
+                # Check if miner_address already existed, ignore create lock_address, withdraw_address.
+                if miner_created:
+                    lock_address, lock_created = \
+                        Address.objects.get_or_create(address=serializer.validated_data.get('lock_address'),
+                                                      address_miner=miner,
+                                                      category='lock')
+                    # updating updated_at field
+                    lock_address.save()
+                    # Check if lock_address already existed, ignore create withdraw_address.
+                    if lock_created:
+                        withdraw_address, withdraw_created = \
+                            Address.objects.get_or_create(address=serializer.validated_data.get('withdraw_address'),
+                                                          address_miner=miner,
+                                                          category='withdraw')
+                        # updating updated_at field
+                        withdraw_address.save()
+                        serializer.save(miner=miner, withdraw_address=withdraw_address, miner_address=miner_address,
+                                        lock_address=lock_address)
+                    else:
+                        serializer.save(miner=miner, withdraw_address=None, miner_address=miner_address,
+                                        lock_address=lock_address)
+                else:
+                    serializer.save(miner=miner, withdraw_address=None, miner_address=miner_address, lock_address=None)
 
             else:
                 serializer.save(miner=miner, withdraw_address=None, miner_address=None, lock_address=None)
 
         else:
             logger.info('Repetitious share, saving.')
-            serializer.save(status="repetitious", miner=miner)
+            if _status != 'invalid':
+                miner_address, miner_created = Address.objects.get_or_create(
+                    address=serializer.validated_data.get('miner_address'), address_miner=miner, category='miner')
+                # updating updated_at field
+                miner_address.save()
+                serializer.save(
+                    status="repetitious", miner=miner, withdraw_address=None, miner_address=miner_address,
+                    lock_address=None
+                )
+            else:
+                serializer.save(
+                    status="repetitious", miner=miner, withdraw_address=None, miner_address=None, lock_address=None
+                )
             _status = "repetitious"
         if _status == "solved":
             logger.info('Solved share, saving.')
@@ -617,31 +644,15 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 "blocks_in_hour": float
             }
         """
-        # Calculate hash_rate of network with getting last block between now time and past PERIOD_DIAGRAM
-        url = urljoin(ERGO_EXPLORER_ADDRESS, 'blocks')
-        query = {
-            'startDate': int(timezone.now().timestamp() - PERIOD_DIAGRAM) * 1000,
-            'endDate': int(timezone.now().timestamp()) * 1000
-        }
-        try:
-            data_explorer = requests.get(url, query)
-            if not 200 <= data_explorer.status_code <= 299:
-                raise requests.exceptions.RequestException(data_explorer.json())
-        except requests.exceptions.RequestException as e:
-            logger.error("Can not resolve response from Explorer")
-            logger.error(e)
-            return Response({'status': 'error', 'message': str(e)})
-        items = data_explorer.json().get('items')
-        difficulty_network = 0
-        for item in items:
-            difficulty_network += item.get('difficulty')
-        # Calculate HashRate of pool
-        pool_hash_rate = Share.objects.aggregate(
-            sum_total_difficulty=Sum('difficulty', filter=Q(
-                created_at__gte=(timezone.now() - timedelta(seconds=PERIOD_DIAGRAM))
-            ) & Q(
-                status__in=['valid', 'solved']
-            )))
+        # get hash_rate of network and pool in past PERIOD_DIAGRAM
+        hash_rate = HashRate.objects.order_by('created_at').last()
+        if hash_rate:
+            hash_rate = {
+                "network": hash_rate.network if hash_rate.network else 1,
+                "pool": hash_rate.pool if hash_rate.pool else 1
+            }
+        else:
+            hash_rate = {"network": 1, "pool": 1}
         # Number of miner in table Miner
         count_miner = Miner.objects.count()
 
@@ -664,10 +675,7 @@ class InfoViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         price_usd = None if price_usd is None else float(price_usd.value)
 
         response = {
-            "hash_rate": {
-                "network": int(difficulty_network / PERIOD_DIAGRAM) + 1,
-                "pool": int((pool_hash_rate.get("sum_total_difficulty") or 0) / PERIOD_DIAGRAM) or 1
-            },
+            "hash_rate": hash_rate,
             "miners": count_miner,
             "active_miners": active_miners_count,
             "price": {
@@ -730,7 +738,7 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         ordering_fields = ordering_fields + ['-' + i for i in ordering_fields]
         field = self.request.query_params.get('ordering')
         order = field if field in ordering_fields else self.ordering
-        # change query params to original ordering field 
+        # change query params to original ordering field
         if order in self.original_ordering:
             order = self.original_ordering[order]
 
