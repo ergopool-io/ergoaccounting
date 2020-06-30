@@ -2221,6 +2221,15 @@ class ImmatureToMatureTestCase(TestCase):
                 'response': headers
             }
 
+        if 'blocks' in url.lower():
+            headers = json.loads(open('core/data_testing/sibling_header.json').read())
+            return {
+                'status': 'success',
+                'response': {
+                    'header': headers
+                }
+            }
+
         return {
             'response': None,
             'status': 'error'
