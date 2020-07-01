@@ -5,19 +5,19 @@
   "results": [
     {
       "date": 1577836800,
-      "tx": null,
+      "tx": "876",
       "height": 1236,
       "amount": -200
     },
     {
       "date": 1577836800,
-      "tx": null,
+      "tx": "1234",
       "height": 1234,
       "amount": -400
     },
     {
       "date": 1577491200,
-      "tx": null,
+      "tx": "765",
       "height": 1235,
       "amount": -600
     }
