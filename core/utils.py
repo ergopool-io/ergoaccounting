@@ -364,5 +364,4 @@ def verify_recaptcha(recaptcha_code):
         "response": recaptcha_code
     }
     response = requests.post(url, data=post_data).json()
-    # return response.get('success')
-    return True
+    return response.get('success')
