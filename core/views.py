@@ -310,7 +310,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
             select={
                 'date': 'EXTRACT(epoch from "core_balance"."created_at"::DATE)'
             }
-        ).values('date', 'max_height').annotate(amount=Sum('balance')).order_by(order)
+        ).values('date', 'max_height', 'tx_id').annotate(amount=Sum('balance')).order_by(order)
         balances = list(balances)
 
         # Create response
@@ -318,7 +318,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         for balance in balances:
             response.append({
                 "date": int(balance['date']),
-                "tx": None,
+                "tx": str(balance['tx_id']),
                 "height": int(balance['max_height']),
                 "amount": int(balance['amount'])
             })
