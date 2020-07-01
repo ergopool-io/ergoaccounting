@@ -526,7 +526,7 @@ def periodic_verify_blocks():
     for share in shares:
         data_node = node_request('wallet/transactionById', params={'id': share.transaction_id})
         if data_node['status'] == 'success':
-            tx_height = data_node['response'][0]['inclusionHeight']
+            tx_height = data_node['response']['inclusionHeight']
             if tx_height == share.block_height:
                 logger.info('tx is valid.')
                 share.transaction_valid = True
