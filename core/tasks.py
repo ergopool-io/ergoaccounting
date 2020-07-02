@@ -210,6 +210,11 @@ def immature_to_mature():
     """
     logger.info('running immature to mature task.')
 
+    def calc_identity(header):
+        pow = header['powSolutions']
+        to_hash = pow['w'] + pow['n'] + str(pow['d'])
+        return blake2b(to_hash.encode('utf-8'), digest_size=32).hexdigest()
+
     def make_share_orphaned(share):
         """
         makes a share orphaned
@@ -266,10 +271,19 @@ def immature_to_mature():
     ids = set(h['id'] for h in headers)
 
     for share in all_considered_shares:
-        if share.parent_id not in ids or len(ids.intersection(share.next_ids)) > 0:
-            logger.debug('we orphan share {} because either its parent is not on the chain or'
-                         'some of its parents child are present.'.format(share.share))
-            # must be orphaned
+        if share.parent_id not in ids:
+            logger.debug('we orphan share {} because its parent is not on the chain'.format(share.share))
+            make_share_orphaned(share)
+            continue
+
+        intersect = ids.intersection(share.next_ids)
+        for header_id in intersect:
+            identity = calc_identity(node_request('blocks/' + header_id)['response']['header'])
+            if identity == share.pow_identity:
+                intersect.remove(header_id)
+                break
+        if len(intersect) > 0:
+            logger.debug('we orphan share {} because its siblings are on chain: {}!'.format(share.share, intersect))
             make_share_orphaned(share)
 
     q = Q()
@@ -301,9 +315,7 @@ def immature_to_mature():
                 continue
 
             header = header['response'][0]
-            pow = header['powSolutions']
-            to_hash = pow['w'] + pow['n'] + str(pow['d'])
-            pow_identity = blake2b(to_hash.encode('utf-8'), digest_size=32).hexdigest()
+            pow_identity = calc_identity(header)
             tx_pow_ok = pow_identity == share.pow_identity
 
         if not tx_pow_ok or not tx_height_ok:
@@ -514,7 +526,7 @@ def periodic_verify_blocks():
     for share in shares:
         data_node = node_request('wallet/transactionById', params={'id': share.transaction_id})
         if data_node['status'] == 'success':
-            tx_height = data_node['response'][0]['inclusionHeight']
+            tx_height = data_node['response']['inclusionHeight']
             if tx_height == share.block_height:
                 logger.info('tx is valid.')
                 share.transaction_valid = True
