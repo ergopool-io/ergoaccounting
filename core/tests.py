@@ -663,7 +663,7 @@ class UserApiTestCase(TestCase):
         time = datetime(2020, 1, 1, 8, 0, 20, 395985, tzinfo=timezone.utc)
         # create miner for actions hash_rate, share, income
         self.miner_actions = Miner.objects.create(public_key='hash', nick_name='hash')
-        # Create shares for actions hash_rate, share, income 
+        # Create shares for actions hash_rate, share, income
         shares_actions = [
             Share.objects.create(share=random_string(), miner=self.miner_actions, status="solved",
                                  difficulty=1000, block_height=1006),
@@ -694,9 +694,9 @@ class UserApiTestCase(TestCase):
         Balance.objects.create(miner=self.miner_actions, share=shares_actions[5], balance=600, status="mature")
 
         balance_actions = [
-            Balance.objects.create(miner=self.miner_actions, balance=-400, status="withdraw", max_height=1234),
-            Balance.objects.create(miner=self.miner_actions, balance=-600, status="withdraw", max_height=1235),
-            Balance.objects.create(miner=self.miner_actions, balance=-200, status="withdraw", max_height=1236),
+            Balance.objects.create(miner=self.miner_actions, balance=-400, tx_id="1234", status="withdraw", max_height=1234),
+            Balance.objects.create(miner=self.miner_actions, balance=-600, tx_id="765", status="withdraw", max_height=1235),
+            Balance.objects.create(miner=self.miner_actions, balance=-200, tx_id="876", status="withdraw", max_height=1236),
         ]
         # Set timestamp for create_at shares
         for i, balance in enumerate(balance_actions):
@@ -2221,6 +2221,15 @@ class ImmatureToMatureTestCase(TestCase):
                 'response': headers
             }
 
+        if 'blocks' in url.lower():
+            headers = json.loads(open('core/data_testing/sibling_header.json').read())
+            return {
+                'status': 'success',
+                'response': {
+                    'header': headers
+                }
+            }
+
         return {
             'response': None,
             'status': 'error'
@@ -3307,11 +3316,11 @@ class PeriodicVerifyBlocks(TestCase):
                 }
             if params == '8':
                 return {
-                    'response': [{'inclusionHeight': int(params) + 1}],
+                    'response': {'inclusionHeight': int(params) + 1},
                     'status': 'success'
                 }
             return {
-                'response': [{'inclusionHeight': int(params)}],
+                'response': {'inclusionHeight': int(params)},
                 'status': 'success'
             }
 
