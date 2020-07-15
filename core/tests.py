@@ -1497,6 +1497,92 @@ class PPLNSFunctionTest(TestCase):
         Configuration.objects.all().delete()
 
 
+class PPSFunctionTest(TestCase):
+    """
+    Test class for prop function
+    In all the test functions we assume that 'MAX_REWARD' is 35erg and 'TOTAL_REWARD' is 65erg.
+    So in other situations the results may not be valid.
+    """
+
+    def setUp(self):
+        """
+        create 5 miners and 33 shares.
+        share indexes [14, 34, 35] are solved (indexes are from 0) odd indexes are invalid other are valid
+        setUp function to create 5 miners for testing prop function
+        :return:
+        """
+        Configuration.objects.create(key='REWARD_ALGORITHM', value='PPS')
+        Configuration.objects.create(key='TOTAL_REWARD', value=str(int(67.5e9)))
+        Configuration.objects.create(key='FEE_FACTOR', value='0')
+        Configuration.objects.create(key='REWARD_FACTOR', value=str(65 / 67.5))
+        Configuration.objects.create(key='POOL_BASE_FACTOR', value=str(1000))
+        # create miners lists
+        miners = [Miner.objects.create(nick_name="miner %d" % i, public_key=str(i)) for i in range(3)]
+        # create shares list
+        shares = [Share.objects.create(
+            share=str(i),
+            miner=miners[i % 3],
+            status="solved" if i in [14, 34, 35] else "valid" if i % 2 == 0 else "invalid",
+            difficulty=1000
+        ) for i in range(36)]
+        # set create date for each shares to make them a sequence valid
+        start_date = timezone.now() + timedelta(seconds=-100)
+        for share in shares:
+            share.created_at = start_date
+            share.save()
+            start_date += timedelta(seconds=1)
+        self.miners = miners
+        self.shares = shares
+        self.pps = RewardAlgorithm.get_instance().perform_logic
+
+    def test_pps_valid(self):
+        """
+        test pps function to generate a balance for any share in system
+        :return: nothing
+        """
+        # call prop function for an invalid (not solved) share, 8th for example
+        share = self.shares[12]
+        self.pps(share)
+        balances = Balance.objects.filter(share=share)
+        self.assertEqual(balances.count(), 1)
+        balance = balances.first()
+        self.assertEqual(balance.balance, 65 * 1e6)
+
+    def test_pps_solved(self):
+        """
+        test pps function to generate a balance for any share in system
+        :return: nothing
+        """
+        # call prop function for an invalid (not solved) share, 8th for example
+        share = self.shares[14]
+        self.pps(share)
+        balances = Balance.objects.filter(share=share)
+        self.assertEqual(balances.count(), 1)
+        balance = balances.first()
+        self.assertEqual(balance.balance, 65 * 1e6)
+
+    def test_pps_invalid(self):
+        """
+        test pps function to generate a balance for any share in system
+        :return: nothing
+        """
+        # call prop function for an invalid (not solved) share, 8th for example
+        share = self.shares[13]
+        self.pps(share)
+        balances = Balance.objects.filter(share=share).count()
+        self.assertEqual(balances, 0)
+
+    def tearDown(self):
+        """
+        tearDown function to delete miners created in setUp function
+        :return:
+        """
+        Configuration.objects.all().delete()
+        Balance.objects.all().delete()
+        Share.objects.all().delete()
+        Miner.objects.all().delete()
+
+
 class BlockTestCase(TestCase):
     """
     Test for different modes call api /blocks
@@ -2293,7 +2379,7 @@ class ImmatureToMatureTestCase(TestCase):
                                  pow_identity=default_hash)
 
         # by default all shares have immature balances for each miner
-        for share in Share.objects.all():
+        for share in Share.objects.filter(status='solved'):
             for miner in self.miners:
                 Balance.objects.create(share=share, miner=miner, balance=int(100e9), status='immature')
                 Balance.objects.create(share=share, miner=miner, balance=int(100e9), status='mature')
