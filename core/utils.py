@@ -41,7 +41,7 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
             return
 
         # finding the penultimate valid share
-        beginning_share = self.get_beginning_share(share.created_at)
+        beginning_share = self.get_beginning_share(share)
         shares = Share.objects.filter(
             created_at__lte=share.created_at,
             created_at__gte=beginning_share.created_at,
@@ -53,10 +53,10 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
         self.create_balance_from_share(shares, share)
 
     @abc.abstractmethod
-    def get_beginning_share(self, considered_time):
+    def get_beginning_share(self, share):
         """
         This method calculates the first valid share based on the implemented algorithm
-        :param considered_time: shares before this time are considered
+        :param share: current share
         :return: first valid share based on implemented algorithm
         """
         return
@@ -170,13 +170,40 @@ class RewardAlgorithm(metaclass=abc.ABCMeta):
             logger.info('Balance created for all miners related to this round.')
 
 
-class Prop(RewardAlgorithm):
-    def get_beginning_share(self, considered_time):
+class PPS(RewardAlgorithm):
+    def should_run_reward_algorithm(self, share):
+        return share.status in ['valid', 'solved']
+
+    def get_beginning_share(self, share):
         """
-        This method calculates the first valid share based on prop algorithm
-        :param considered_time: shares before this time are considered
+        This method calculates the first valid share based on the implemented algorithm
+        :param share: current share
         :return: first valid share based on implemented algorithm
         """
+        return share
+
+    def get_reward_to_share(self):
+        """
+        calculates real reward to share between shares of a round
+        :return: real reward to be shared
+        """
+        # total reward considering pool fee and reward factor
+        REWARD_FACTOR = Configuration.objects.REWARD_FACTOR
+        PRECISION = Configuration.objects.REWARD_FACTOR_PRECISION
+        TOTAL_REWARD = round((Configuration.objects.TOTAL_REWARD / 1e9) * REWARD_FACTOR, PRECISION)
+        TOTAL_REWARD = int(TOTAL_REWARD * 1e9)
+        SOLUTION_REWARD = int(TOTAL_REWARD * (1 - Configuration.objects.FEE_FACTOR))
+        return SOLUTION_REWARD / Configuration.objects.POOL_BASE_FACTOR
+
+
+class Prop(RewardAlgorithm):
+    def get_beginning_share(self, share):
+        """
+        This method calculates the first valid share based on prop algorithm
+        :param share: current share
+        :return: first valid share based on implemented algorithm
+        """
+        considered_time = share.created_at
         penultimate_solved_share = Share.objects.filter(
             created_at__lt=considered_time,
             status="solved",
@@ -199,12 +226,13 @@ class Prop(RewardAlgorithm):
 
 
 class PPLNS(RewardAlgorithm):
-    def get_beginning_share(self, considered_time):
+    def get_beginning_share(self, share):
         """
         This method calculates the first valid share based on the PPLNS algorithm
-        :param considered_time: shares before this time are considered
+        :param share: current share
         :return: first valid share based on implemented algorithm
         """
+        considered_time = share.created_at
         N = Configuration.objects.PPLNS_N
         prev_shares = Share.objects.filter(
             created_at__lte=considered_time,
