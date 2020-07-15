@@ -224,7 +224,7 @@ def immature_to_mature():
         share.is_orphaned = True
         share.save()
 
-        if share.status == 'solved':
+        if share.status in ['solved', 'valid']:
             # creating equivalent mature balances with negative balance
             balances = Balance.objects.filter(share=share, status='immature')
             duplicate_balances = [b for b in balances]
@@ -248,14 +248,17 @@ def immature_to_mature():
     CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
 
     # getting all shares with immature balances which have been created at least in CONFIRMATION_LENGTH block ago
-    shares = Share.objects.filter(balance__status="immature", block_height__lte=(current_height - CONFIRMATION_LENGTH),
-                                  status='solved', is_orphaned=False).distinct().order_by('created_at')
+    shares = Share.objects.filter(
+        balance__status="immature",
+        block_height__lte=(current_height - CONFIRMATION_LENGTH),
+        is_orphaned=False
+    ).distinct().order_by('created_at')
     # no shares to do anything for
     if shares.count() == 0:
         return
 
     first_one = shares.first()
-    first_valid_share = RewardAlgorithm.get_instance().get_beginning_share(first_one.created_at)
+    first_valid_share = RewardAlgorithm.get_instance().get_beginning_share(first_one)
     all_considered_shares = Share.objects.filter(created_at__lte=shares.last().created_at,
                                                  created_at__gte=first_valid_share.created_at,
                                                  status__in=['solved', 'valid'], is_orphaned=False)
@@ -287,8 +290,11 @@ def immature_to_mature():
             make_share_orphaned(share)
 
     q = Q()
-    shares = Share.objects.filter(balance__status="immature", block_height__lte=(current_height - CONFIRMATION_LENGTH),
-                                  status='solved', is_orphaned=False).distinct().order_by('block_height')
+    shares = Share.objects.filter(
+        balance__status="immature",
+        block_height__lte=(current_height - CONFIRMATION_LENGTH),
+        is_orphaned=False
+    ).distinct().order_by('block_height')
     for share in shares:
         txt_res = node_request('wallet/transactionById', params={'id': share.transaction_id})
         if txt_res['status'] != 'success':
