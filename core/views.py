@@ -133,9 +133,9 @@ class ShareView(viewsets.GenericViewSet,
                     status="repetitious", miner=miner, withdraw_address=None, miner_address=None, lock_address=None
                 )
             _status = "repetitious"
-        if _status == "solved":
+        if _status in ["solved", "valid"]:
             logger.info('Solved share, saving.')
-            RewardAlgorithm.get_instance().perform_logic(Share.objects.get(share=_share, status="solved"))
+            RewardAlgorithm.get_instance().perform_logic(Share.objects.get(share=_share))
 
 
 class BalanceView(viewsets.GenericViewSet,
