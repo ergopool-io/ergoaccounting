@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from datetime import datetime, timedelta
 from hashlib import blake2b
 from pathlib import Path
@@ -13,15 +14,117 @@ from django.db.models import Q, Sum, Count, Max, Min
 from pycoingecko import CoinGeckoAPI
 
 from ErgoAccounting.celery import app
-from core.models import Miner, Balance, Configuration, Share, AggregateShare, ExtraInfo, HashRate
+from core.models import Miner, Balance, Configuration, Share, AggregateShare, ExtraInfo, HashRate, Transaction
 from core.utils import node_request, get_miner_payment_address, RewardAlgorithm
 
 logger = logging.getLogger(__name__)
 
-ERGO_EXPLORER_ADDRESS = getattr(settings, "ERGO_EXPLORER_ADDRESS")
 
 @app.task
-def periodic_withdrawal():
+def handle_withdraw():
+    """
+    will create tx for pending_withdrawal balances!
+    """
+    balances = Balance.objects.filter(status='pending_withdrawal', tx=None)
+    logger.info('withdrawing for {} balances.'.format(len(balances)))
+    if balances.count() == 0:
+        logger.debug('quiting sending txs, no request.')
+        return
+
+    MAX_NUMBER_OF_OUTPUTS = Configuration.objects.MAX_NUMBER_OF_OUTPUTS
+    TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
+
+    # getting all unspent boxes
+    res = node_request('wallet/boxes/unspent')
+    if res['status'] != 'success':
+        logger.critical('can not retrieve boxes from node. quiting sending txs, {}.'.format(res))
+        return
+
+    used_inputs = ','.join(x.inputs for x in Transaction.objects.filter(is_confirmed=False))
+    boxes = [box for box in res['response'] if box['box']['boxId'] not in used_inputs]
+    logger.debug('boxes to use potentially for generating txs len: {}'.format(len(boxes)))
+
+    to_use_box_ind = 0
+    # generate and send transaction for each chunk
+    for chuck_start in range(0, len(balances), MAX_NUMBER_OF_OUTPUTS):
+        chunk = balances[chuck_start:chuck_start + MAX_NUMBER_OF_OUTPUTS]
+        needed_erg = sum(x.actual_payment for x in chunk) + TRANSACTION_FEE
+        to_use_boxes = []
+        to_use_boxes_value_sum = 0
+        # take enough boxes for this chunk value sum
+        while to_use_box_ind < len(boxes) and to_use_boxes_value_sum < needed_erg:
+            box = boxes[to_use_box_ind]
+            res = node_request(urljoin('utxo/byIdBinary/', box['box']['boxId']))
+            if res['status'] != 'success':
+                logger.critical('can not retrieve box info from node, box: {}, response: {}.'.format(box, res))
+                to_use_box_ind += 1
+                continue
+
+            to_use_boxes.append(res['response']['bytes'])
+            to_use_boxes_value_sum += box['box']['value']
+            to_use_box_ind += 1
+
+        if to_use_boxes_value_sum < needed_erg:
+            logger.critical('not enough ergs for withdrawal! quiting.')
+            return
+
+        data = {
+            'requests': [{
+                'address': get_miner_payment_address(x.miner),
+                'value': x.actual_payment
+            } for x in chunk],
+            'fee': TRANSACTION_FEE,
+            'inputsRaw': to_use_boxes
+        }
+
+        res = None
+        try:
+            res = node_request('wallet/transaction/generate', data=data, request_type='post')
+        except Exception as e:
+            logger.critical('error while sending payments, {}.'.format(e))
+
+        if res['status'] == 'success':
+            tx = res['response']
+            send_res = node_request('transactions', data=tx, request_type='post')
+            if send_res['status'] == 'success':
+                logger.info('tx was generated and sent successfully, {}.'.format(tx['id']))
+                inputs = ','.join([x['boxId'] for x in tx['inputs']])
+                saved_tx = Transaction.objects.create(tx_id=tx['id'], tx_body=tx, inputs=inputs)
+                for balance in chunk:
+                    balance.tx = saved_tx
+                Balance.objects.bulk_update(chunk, ['tx'])
+            else:
+                logger.critical('could not send the transaction {}, response: {}'.format(tx, send_res))
+        else:
+            logger.critical('could not generate the transaction {}, response: {}'.format(data, res))
+
+
+@app.task
+def handle_transactions():
+    txs = Transaction.objects.filter(is_confirmed=False)
+    logger.info('watching txs: {}'.format(txs.count()))
+    confirmation_num = 10
+    for tx in txs:
+        mined_tx = node_request('wallet/transactionById?id={}'.format(tx.tx_id))
+        if mined_tx['status'] == 'success':
+            body = mined_tx['response']
+            if body['numConfirmations'] >= confirmation_num:
+                # confirmed, will change balance statuses and is_confirmed flag of tx
+                tx.is_confirmed = True
+                Balance.objects.filter(status='pending_withdrawal', tx=tx).update(status='withdraw')
+        else:
+            tx_body = tx.tx_body.replace('\'', '\"')
+            send_res = node_request('transactions', data=json.loads(tx_body), request_type='post')
+            if send_res['status'] == 'success':
+                logger.info('broadcast tx: {} successfully.'.format(tx.tx_id))
+            else:
+                logger.error('broadcast failed for tx: {}, res: {}.'.format(tx.tx_id, send_res))
+
+    Transaction.objects.bulk_update(txs, ['is_confirmed'])
+
+
+@app.task
+def periodic_withdrawal(just_return=False):
     """
     A task which for every miner, calculates his balance and if it is above some threshold
     (whether default one or one specified by the miner), calls the generate_and_send_transaction
@@ -67,137 +170,14 @@ def periodic_withdrawal():
             # above threshold (whether default one or the one specified by the miner)
             outputs.append((miner.public_key, balance))
 
-    # call the appropriate function for withdrawal
-    try:
-        logger.info('we will withdraw for {} miners.'.format(len(outputs)))
-        # Creating balance object with pending_withdrawal status
-        outputs = sorted(outputs)
-        objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance,
-                           min_height=pk_to_height[pk][0], max_height=pk_to_height[pk][1]) for pk, balance in outputs]
-        Balance.objects.bulk_create(objects)
-        outputs = [(x[0], x[1], objects[i].pk) for i, x in enumerate(outputs)]
-        generate_and_send_transaction(outputs)
-
-    except Exception as e:
-        logger.critical('could not periodically withdraw due to exception, probably in node connection, {}.'.format(e))
-
-
-@app.task
-def generate_and_send_transaction(outputs, subtract_fee=False):
-    """
-    This function generates transactions for each chunk of outputs based on configuration
-    parameter, for example if len(outputs) is 40 and the so called parameter is 15 then it generates
-    three transactions where they contain 15, 15, 10 outputs each
-    miners with specified pks in output must be present.
-    Checking whether requested withdrawal is valid or not must be done before calling this function!
-    Raises Exception if node returns error.
-    :param outputs: list of tuples (pk, value, id), value must be erg * 1e9. so for 10 ergs, value is 10e9;
-    id: id of balance object with status pending_withdrawal associated with this item
-    :param subtract_fee: whether to subtract fee from each output or not
-    :return: nothing
-    :effect: creates balance for miners specified by each pk. must remove pending balances in any case
-    """
-    logger.info('withdrawing for {} requests'.format(len(outputs)))
-    pk_to_miner = {
-        miner.public_key: miner for miner in Miner.objects.filter(public_key__in=[x[0] for x in outputs])
-    }
-
-    # this function removes pending_withdrawal balances related to the outputs
-    def remove_pending_balances(outputs):
-        Balance.objects.filter(pk__in=[x[2] for x in outputs]).delete()
-
-    # if output is empty
-    if not outputs:
-        logger.debug('quiting sending txs, no request.')
-        return
-
-    pk_to_address = {
-        miner.public_key: get_miner_payment_address(miner) for _, miner in pk_to_miner.items()
-    }
-
-    pk_to_height = {
-        bal.miner.public_key: (bal.min_height, bal.max_height)
-        for bal in Balance.objects.filter(pk__in=[x[2] for x in outputs])
-    }
-
-    invalid_requests = [(pk, amount, obj_id) for pk, amount, obj_id in outputs if pk_to_address[pk] is None]
-    if invalid_requests:
-        logger.error("some miners don't have valid payment addresses!, {}".format([x[0] for x in invalid_requests]))
-
-    remove_pending_balances(invalid_requests)
-    outputs = [(pk, amount, obj_id) for pk, amount, obj_id in outputs if pk_to_address[pk] is not None]
-
-    MAX_NUMBER_OF_OUTPUTS = Configuration.objects.MAX_NUMBER_OF_OUTPUTS
-    TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
-
-    # getting all unspent boxes
-    res = node_request('wallet/boxes/unspent')
-    if res['status'] != 'success':
-        logger.critical('can not retrieve boxes from node. quiting sending txs, {}.'.format(res))
-        remove_pending_balances(outputs)
-        return
-
-    boxes = res['response']
-    logger.debug('boxes to use potentially for generating txs len: {}'.format(len(boxes)))
-    # creating chunks of size MAX_NUMBER_OF_OUTPUT from outputs
-
-    to_use_box_ind = 0
-    # generate and send transaction for each chunk
-    for chuck_start in range(0, len(outputs), MAX_NUMBER_OF_OUTPUTS):
-        chunk = outputs[chuck_start:chuck_start + MAX_NUMBER_OF_OUTPUTS]
-        needed_erg = sum(x[1] for x in chunk)
-        needed_erg += TRANSACTION_FEE if not subtract_fee else 0
-        to_use_boxes = []
-        to_use_boxes_value_sum = 0
-        # take enough boxes for this chunk value sum
-        while to_use_box_ind < len(boxes) and to_use_boxes_value_sum < needed_erg:
-            box = boxes[to_use_box_ind]
-            res = node_request(urljoin('utxo/byIdBinary/', box['box']['boxId']))
-            if res['status'] != 'success':
-                logger.critical('can not retrieve box info from node, box: {}, response: {}. quiting sending txs.'
-                                .format(box, res))
-                to_use_box_ind += 1
-                remove_pending_balances(outputs[chuck_start:])
-                return
-
-            byte = res['response']['bytes']
-            to_use_boxes.append(byte)
-            to_use_boxes_value_sum += box['box']['value']
-            to_use_box_ind += 1
-
-        if to_use_boxes_value_sum < needed_erg:
-            logger.critical('not enough ergs for withdrawal! quiting.')
-            remove_pending_balances(outputs[chuck_start:])
-            return
-
-        data = {
-            'requests': [{
-                'address': pk_to_address[x[0]],
-                'value': x[1] - (TRANSACTION_FEE if subtract_fee else 0)
-            } for x in chunk],
-            'fee': TRANSACTION_FEE,
-            'inputsRaw': to_use_boxes
-        }
-
-        res = None
-        try:
-            res = node_request('wallet/transaction/send', data=data, request_type='post')
-        except Exception as e:
-            logger.critical('error while sending payments, {}.'.format(e))
-
-        remove_pending_balances(chunk)
-        if res['status'] == 'success':
-            logger.info('tx was sent successfully, {}.'.format(res))
-            balances = [Balance(miner=pk_to_miner[pk], balance=-value, status="withdraw",
-                                tx_id=res['response'], min_height=pk_to_height[pk][0],
-                                max_height=pk_to_height[pk][1])for pk, value, _ in chunk]
-            Balance.objects.bulk_create(balances)
-
-        else:
-            logger.critical('can not create and send the transaction {}, response: {}'.format(data, res))
-            remove_pending_balances(outputs[chuck_start + MAX_NUMBER_OF_OUTPUTS:])
-            logger.error('quiting sending remaining transactions.')
-            return
+    logger.info('we will withdraw for {} miners.'.format(len(outputs)))
+    # Creating balance object with pending_withdrawal status
+    outputs = sorted(outputs)
+    objects = [Balance(miner=pk_to_miner.get(pk), status="pending_withdrawal", balance=-balance, actual_payment=balance,
+                       min_height=pk_to_height[pk][0], max_height=pk_to_height[pk][1]) for pk, balance in outputs]
+    if just_return:
+        return objects
+    Balance.objects.bulk_create(objects)
 
 
 @app.task

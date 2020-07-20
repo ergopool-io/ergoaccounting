@@ -16,6 +16,7 @@ router.register(r'administrator/users', AdministratorUserViewSet, basename='Admi
 router.register(r'totp', TOTPDeviceViewSet, basename='TOTP Device')
 router.register(r'ui', UIDataViewSet, basename='UI Data')
 router.register(r'support', SupportViewSet, basename='Support')
+router.register(r'payment', PaymentViewSet, basename='payment')
 
 urlpatterns = router.urls
 urlpatterns += [
