@@ -99,9 +99,14 @@ def parse_cron_tab(cron_format, default):
 # "0 0 * * *" --> execute at midnight
 # "0 */3 * * *" --> execute every three hours: 3am, 6am, 9am, noon, 3pm, 6pm, 9pm.
 app.conf.beat_schedule = {
-    'periodic_withdrawal': {
-        'task': 'core.tasks.periodic_withdrawal',
-        'schedule': parse_cron_tab(os.environ.get('PERIODIC_WITHDRAWAL_INTERVAL'), 24 * 3600),
+    'periodic_handle_withdraw': {
+        'task': 'core.tasks.handle_withdraw',
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_HANDLE_WITHDRAW_INTERVAL'), 15 * 60),
+        'args': ()
+    },
+    'periodic_handle_txs': {
+        'task': 'core.tasks.handle_transactions',
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_HANDLE_TRANSACTIONS_INTERVAL'), 25 * 60),
         'args': ()
     },
     'periodic_immature_to_mature': {
