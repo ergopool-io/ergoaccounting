@@ -1,15 +1,21 @@
-import logging
-from datetime import datetime, timedelta
-from pydoc import locate
+import base64
 import json
+import logging
+import os
+from datetime import datetime, timedelta
+from io import BytesIO
+from pydoc import locate
 
 import django_filters as filters_rest
+import qrcode
 from django.conf import settings
 from django.db.models import Q, Count, Sum, Max, Min
 from django.db.utils import DataError
-from django.http import QueryDict
+from django.http import QueryDict, JsonResponse
 from django.utils import timezone
 from django.utils.timezone import get_current_timezone
+from django_otp.plugins.otp_totp.models import TOTPDevice
+from django_otp.util import random_hex
 from rest_framework import filters
 from rest_framework import viewsets, mixins, status
 from rest_framework.authentication import SessionAuthentication
@@ -24,17 +30,12 @@ from ErgoAccounting.settings import TOTAL_PERIOD_HASH_RATE, PERIOD_DIAGRAM, DEFA
     TOTAL_PERIOD_COUNT_SHARE, QR_CONFIG, DEVICE_CONFIG
 from core.authentication import CustomPermission, ReadOnlyCustomPermission, ExpireTokenAuthentication
 from core.models import Share, Miner, Balance, Configuration, CONFIGURATION_DEFAULT_KEY_VALUE, \
-    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token, HashRate
+    CONFIGURATION_KEY_TO_TYPE, Address, ExtraInfo, TokenAuth as Token, HashRate, Transaction
 from core.serializers import ShareSerializer, BalanceSerializer, MinerSerializer, ConfigurationSerializer, \
     ErgoAuthTokenSerializer, TOTPDeviceSerializer, UIDataSerializer, SupportSerializer
-from core.tasks import generate_and_send_transaction, send_support_email
+from core.tasks import periodic_withdrawal
+from core.tasks import send_support_email
 from core.utils import RewardAlgorithm, BlockDataIterable
-from django_otp.plugins.otp_totp.models import TOTPDevice
-from django_otp.util import random_hex
-import qrcode
-import base64
-from io import BytesIO
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -230,47 +231,6 @@ class UserApiViewSet(viewsets.GenericViewSet,
         pk = self.kwargs.get('pk')
         miner = Miner.objects.filter(Q(public_key=pk.lower()) | Q(address__address=pk)).distinct()
         return miner.first()
-
-    @action(detail=True, methods=['post'], name='withdrawal')
-    def withdraw(self, request, pk=None):
-        """
-        this action specifies withdraw action of the miner.
-        runs a celery task in case that the request is valid
-        """
-        TRANSACTION_FEE = Configuration.objects.TRANSACTION_FEE
-        miner = self.get_object()
-        # balances with "mature", "withdraw" and "pending_withdrawal" status
-        total = Balance.objects.filter(miner=miner, status__in=['mature', 'withdraw', 'pending_withdrawal']).aggregate(
-            Sum('balance')).get('balance__sum')
-
-        if total is None:
-            total = 0
-
-        requested_amount = request.data.get('withdraw_amount')
-
-        try:
-            requested_amount = int(requested_amount)
-            if requested_amount <= 0:
-                raise Exception()
-
-        except:
-            return Response({'message': 'withdraw_amount field is not valid.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if requested_amount < TRANSACTION_FEE:
-            return Response(
-                {'message': 'withdraw_amount must be bigger than transaction fee: {}.'.format(TRANSACTION_FEE)},
-                status=status.HTTP_400_BAD_REQUEST)
-
-        if requested_amount > total:
-            return Response({'message': 'withdraw_amount is bigger than total balance.'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        # creating a pending_withdrawal status
-        balance = Balance.objects.create(miner=miner, balance=-requested_amount, status="pending_withdrawal")
-        generate_and_send_transaction.delay([(miner.public_key, requested_amount, balance.pk)],
-                                            subtract_fee=True)
-        return Response({'message': 'withdrawal was successful.',
-                         'data': {'balance': total - requested_amount}}, status=status.HTTP_200_OK)
 
     def get_balance(self):
         """
@@ -699,6 +659,7 @@ class UserFilter(filters_rest.FilterSet):
     )
     valid_shares = filters_rest.RangeFilter()
     sum_period_diagram_difficulty = filters_rest.RangeFilter()
+
     # status = filters_rest.ChoiceFilter(choices=STATUS_CHOICES)
 
     class Meta:
@@ -756,10 +717,12 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
         # multiplication in PERIOD_DIAGRAM for set range filter on hash_rate
         request_get = dict(self.request.GET)
         if 'hash_rate_min' in request_get:
-            request_get['sum_period_diagram_difficulty_min'] = str(int(request_get['hash_rate_min'][0]) * PERIOD_DIAGRAM)
+            request_get['sum_period_diagram_difficulty_min'] = str(
+                int(request_get['hash_rate_min'][0]) * PERIOD_DIAGRAM)
             request_get.pop('hash_rate_min')
         if 'hash_rate_max' in request_get:
-            request_get['sum_period_diagram_difficulty_max'] = str(int(request_get['hash_rate_max'][0]) * PERIOD_DIAGRAM)
+            request_get['sum_period_diagram_difficulty_max'] = str(
+                int(request_get['hash_rate_max'][0]) * PERIOD_DIAGRAM)
             request_get.pop('hash_rate_max')
         # convert dict to query_dict
         data_request = {}
@@ -779,6 +742,34 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
 
         return miners
 
+    @action(detail=False, methods=['GET'], name='payments')
+    def payments(self, request):
+        query = self.request.query_params
+        tz = get_current_timezone()
+        now = timezone.now()
+        yesterday = now - timedelta(days=1)
+        frm = float(query.get('from') or yesterday.timestamp())
+        to = float(query.get('to') or now.timestamp())
+        txs = Transaction.objects.filter(
+            created_at__gte=timezone.datetime.fromtimestamp(frm, tz=tz),
+            created_at__lte=timezone.datetime.fromtimestamp(to, tz=tz)
+        )
+        res = []
+        for tx in txs:
+            balances = tx.balance_set.all()
+            payments = [{
+                'pk': b.miner.public_key, 'paid': b.actual_payment
+            } for b in balances]
+            total = sum(b.actual_payment for b in balances)
+            res.append({
+                'tx_id': tx.tx_id,
+                'total_payment': total,
+                'created_at': tx.created_at,
+                'is_confirmed': tx.is_confirmed,
+                'payments': payments
+            })
+        return JsonResponse(res, safe=False)
+
     def list(self, request, *args, **kwargs):
 
         def convert_row(row_dict):
@@ -795,6 +786,7 @@ class AdministratorUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
                 "last_ip": row_dict.get("ip"),
                 "status": "active"
             }
+
         # set pagination on response
         try:
             page = self.paginate_queryset(self.get_miners())
@@ -832,7 +824,7 @@ class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.Lis
         token, created = Token.objects.get_or_create(user=user)
         # Checking state that the token of user expired and generate new token for this user.
         if not created:
-            if not (timezone.now() - timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['PER_USE'])) < token.last_use or\
+            if not (timezone.now() - timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['PER_USE'])) < token.last_use or \
                     not (timezone.now() - timedelta(seconds=self.DEFAULT_TOKEN_EXPIRE['TOTAL'])) < token.created:
                 token.delete()
                 token = Token.objects.create(user=user)
@@ -840,7 +832,7 @@ class ErgoAuthToken(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.Lis
         return Response({'token': token.key}, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin,):
+class TOTPDeviceViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, ):
     serializer_class = TOTPDeviceSerializer
     queryset = TOTPDevice.objects.all()
     # For session authentication
@@ -938,7 +930,7 @@ class UIDataViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Creat
                 'error': 'This path is wrong because exist a directory with same name in this path.'
             }, status=status.HTTP_400_BAD_REQUEST)
         except json.JSONDecodeError as e:
-            logger.error("can't decode json in path {}". format(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir)))
+            logger.error("can't decode json in path {}".format(os.path.join(self.DEFAULT_UI_PREFIX_DIRECTORY, dir)))
             logger.error(e)
             return Response({'error': 'Data was corrupted !'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1012,3 +1004,33 @@ class SupportViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.Li
         message = "Name: %s\nEmail: %s\nMessage: %s" % (data.get('name'), data.get('email'), data.get('message'))
         send_support_email.delay(data.get('subject', 'No Subject'), message)
         return Response({'status': ['ok']}, status=status.HTTP_200_OK, headers=headers)
+
+
+class PaymentViewSet(viewsets.ViewSet):
+    """
+    returns list of miner: balance pairs with GET
+    creates pending_withdrawal balances with post
+    """
+    authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
+
+    def list(self, request):
+        balances = periodic_withdrawal(just_return=True)
+        res = []
+        for b in balances:
+            res.append({
+                'miner_id': b.miner.id,
+                'balance': -b.balance,
+                'actual_payment': b.actual_payment,
+                'min_height': b.min_height,
+                'max_height': b.max_height
+
+            })
+        return JsonResponse(res, safe=False)
+
+    def create(self, request):
+        balances = [Balance(miner_id=payment.get('miner_id'), status='pending_withdrawal',
+                            balance=-payment.get('balance'), actual_payment=payment.get('actual_payment'),
+                            min_height=payment.get('min_height'), max_height=payment.get('max_height'))
+                    for payment in request.data]
+        Balance.objects.bulk_create(balances)
+        return JsonResponse({'message': 'balances created successfully!'})

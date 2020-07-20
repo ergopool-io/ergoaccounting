@@ -168,6 +168,14 @@ class MinerIP(models.Model):
         return self.miner.public_key
 
 
+class Transaction(models.Model):
+    tx_id = models.CharField(blank=True, null=True, max_length=200)
+    tx_body = models.TextField(blank=False, null=False)
+    inputs = models.TextField(blank=False, null=False)  # comma-separated input boxes
+    is_confirmed = models.BooleanField(default=False, null=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class Balance(models.Model):
     STATUS_CHOICE = (
         ("immature", "immature"),
@@ -180,7 +188,9 @@ class Balance(models.Model):
     share = models.ForeignKey(Share, on_delete=models.CASCADE, null=True)
     balance = models.BigIntegerField(default=0)
     status = models.CharField(blank=False, choices=STATUS_CHOICE, default="immature", max_length=100)
-    tx_id = models.CharField(blank=True, null=True, max_length=100)
+    # will be used to generate tx, can be more or less than balance field
+    actual_payment = models.BigIntegerField(default=0)
+    tx = models.ForeignKey(Transaction, on_delete=models.CASCADE, null=True)
     min_height = models.IntegerField(null=True)
     max_height = models.IntegerField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -281,3 +291,4 @@ class HashRate(models.Model):
 
     def __str__(self):
         return str(self.created_at)
+
