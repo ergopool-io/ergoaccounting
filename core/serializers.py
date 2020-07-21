@@ -172,8 +172,8 @@ class ErgoAuthTokenSerializer(serializers.Serializer):
         style={'input_type': 'password'},
         trim_whitespace=False
     )
-    recaptcha_code = serializers.CharField(label="recaptcha code")
-    otp_token = serializers.CharField(label="OTP_Token", required=False)
+    recaptcha_code = serializers.CharField(label="recaptcha code", allow_blank=True, required=False)
+    otp_token = serializers.CharField(label="OTP_Token", required=False, allow_blank=True)
 
     def validate_recaptcha_code(self, value):
         if not utils.verify_recaptcha(value):
