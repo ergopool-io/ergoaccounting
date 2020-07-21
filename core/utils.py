@@ -386,10 +386,12 @@ def verify_recaptcha(recaptcha_code):
     :param recaptcha_code:
     :return:
     """
-    url = "https://www.google.com/recaptcha/api/siteverify"
-    post_data = {
-        "secret": settings.RECAPTCHA_SECRET,
-        "response": recaptcha_code
-    }
-    response = requests.post(url, data=post_data).json()
-    return response.get('success')
+    if settings.RECAPTCHA_SECRET:
+        url = "https://www.google.com/recaptcha/api/siteverify"
+        post_data = {
+            "secret": settings.RECAPTCHA_SECRET,
+            "response": recaptcha_code
+        }
+        response = requests.post(url, data=post_data).json()
+        return response.get('success')
+    return True
