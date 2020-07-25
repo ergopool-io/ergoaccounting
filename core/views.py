@@ -342,7 +342,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
                     str(PERIOD_DIAGRAM)
                 )
             }
-        ).values('frame').annotate(sum=Sum('difficulty'))
+        ).values('frame').annotate(sum=Sum('difficulty')).order_by("frame")
 
         shares = list(shares)
         response = []
