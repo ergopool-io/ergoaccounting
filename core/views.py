@@ -333,7 +333,7 @@ class UserApiViewSet(viewsets.GenericViewSet,
         logger.info('computing hash rate for pk: {}'.format(miner.public_key if miner else '--'))
         shares = Share.objects.filter(
             Q(miner=miner) &
-            Q(created_at__gte=timezone.datetime.fromtimestamp(start - (prev_chunks + 1) * PERIOD_DIAGRAM, tz=tz)) &
+            Q(created_at__gt=timezone.datetime.fromtimestamp((start_frame - prev_chunks) * PERIOD_DIAGRAM, tz=tz)) &
             Q(created_at__lte=timezone.datetime.fromtimestamp(stop, tz=tz)) &
             Q(status__in=['valid', 'solved'])
         ).extra(
@@ -343,7 +343,6 @@ class UserApiViewSet(viewsets.GenericViewSet,
                 )
             }
         ).values('frame').annotate(sum=Sum('difficulty')).order_by("frame")
-
         shares = list(shares)
         response = []
         chunk = []
