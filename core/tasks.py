@@ -275,6 +275,12 @@ def immature_to_mature():
         block_height__lte=(current_height - CONFIRMATION_LENGTH),
         is_orphaned=False
     ).distinct().order_by('block_height')
+
+    if Configuration.objects.REWARD_ALGORITHM == 'PPS':
+        logger.info('reward alg is PPS! maturing all remaining ok balances...')
+        Balance.objects.filter(status='immature', share__in=shares).update(status='mature')
+        return
+
     for share in shares:
         txt_res = node_request('wallet/transactionById', params={'id': share.transaction_id})
         if txt_res['status'] != 'success':
