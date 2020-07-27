@@ -2069,6 +2069,32 @@ class ImmatureToMatureTestCase(TestCase):
 
     @patch('core.tasks.node_request', side_effect=mocked_node_request)
     @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm_do_nothing)
+    def test_20_shares_pps(self, mocked_node_request, mock):
+        """
+        must avoid checking transaction
+        """
+        Configuration.objects.create(key='REWARD_ALGORITHM', value='PPS')
+        current_height = ImmatureToMatureTestCase.CURRENT_HEIGHT
+        CONFIRMATION_LENGTH = Configuration.objects.CONFIRMATION_LENGTH
+        confirmed_shares = [x.id for x in Share.objects.filter(balance__status='immature',
+                                                               block_height__lte=(current_height - CONFIRMATION_LENGTH)).distinct()]
+        balances_to_status = {
+            balance.id: balance.status for balance in Balance.objects.all()
+        }
+
+        immature_to_mature()
+        for balance_id in balances_to_status.keys():
+            balance = Balance.objects.get(id=balance_id)
+            if balance.share is None or balance.share.id not in confirmed_shares:
+                self.assertEqual(balance.status, balances_to_status[balance.id])
+            else:
+                if balances_to_status[balance.id] == "immature":
+                    self.assertEqual(balance.status, "mature")
+                else:
+                    self.assertEqual(balance.status, balances_to_status[balance.id])
+
+    @patch('core.tasks.node_request', side_effect=mocked_node_request)
+    @patch('core.tasks.RewardAlgorithm.perform_logic', side_effect=mocked_reward_algorithm_do_nothing)
     def test_some_shares_next_ids_present(self, mocked_node_request, logic):
         """
         20 shares have immature balances and their block_height is less than the threshold
