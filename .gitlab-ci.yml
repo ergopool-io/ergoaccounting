@@ -1,8 +1,14 @@
-default:
-  image: docker:19.03.12
-  variables:
+image: docker:19.03.12
+services:
+  - docker:19.03.12-dind
+  - postgres:latest
+variables:
     CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+    POSTGRES_USER: ergo
+    POSTGRES_PASSWORD: ergo
+    POSTGRES_DB: ergo
+    PG_ROOT_PASSWORD: ergo
 
 stages:
   - build
@@ -18,14 +24,6 @@ build:
     - echo $CONTAINER_TEST_IMAGE
     - docker build --pull -t $CONTAINER_TEST_IMAGE .
     - docker push $CONTAINER_TEST_IMAGE
-
-services:
-  - postgres:latest
-variables:
-  POSTGRES_USER: ergo
-  POSTGRES_PASSWORD: ergo
-  POSTGRES_DB: ergo
-  PG_ROOT_PASSWORD: ergo
 
 test:
   stage: test
