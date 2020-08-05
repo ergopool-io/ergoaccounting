@@ -1,9 +1,6 @@
 image: docker:19.03.12
 services:
   - name: docker:19.03.12-dind
-    entrypoint: ["env", "-u", "DOCKER_HOST"]
-    command: ["dockerd-entrypoint.sh"]
-
 
 variables:
     CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
@@ -22,8 +19,6 @@ stages:
 build:
   stage: build
   script:
-    - echo $CONTAINER_RELEASE_IMAGE
-    - echo $CONTAINER_TEST_IMAGE
     - docker build --pull -t $CONTAINER_TEST_IMAGE .
     - docker push $CONTAINER_TEST_IMAGE
 
@@ -31,10 +26,8 @@ test:
   stage: test
   script:
     - docker network create --driver bridge ergo
-    - docker pull postgres:10.11
+    - docker pull postgres
     - docker run --name db -e POSTGRES_DB=db_accounting -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e PG_ROOT_PASSWORD=admin --network="ergo" --hostname="db" -d postgres
     - sleep 4
-    - docker ps
-    - docker inspect db
     - docker pull $CONTAINER_TEST_IMAGE
     - docker run --network="ergo" $CONTAINER_TEST_IMAGE ./script.sh
