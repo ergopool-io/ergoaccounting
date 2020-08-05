@@ -5,10 +5,10 @@ services:
 variables:
     CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
-    POSTGRES_USER: ergo
-    POSTGRES_PASSWORD: ergo
-    POSTGRES_DB: ergo
-    PG_ROOT_PASSWORD: ergo
+    POSTGRES_USER: admin
+    POSTGRES_PASSWORD: admin
+    POSTGRES_DB: db_accounting
+    PG_ROOT_PASSWORD: admin
 
 stages:
   - build
