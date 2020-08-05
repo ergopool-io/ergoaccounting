@@ -18,10 +18,6 @@ variables:
 stages:
   - test
 
-before_script:
-  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-
-
 test:
   stage: test
   variables:
@@ -32,6 +28,8 @@ test:
   services:
     - name: postgres:latest
       alias: db
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
     - docker ps
     - docker images
