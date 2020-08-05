@@ -23,7 +23,7 @@ test:
   script:
     - docker network create ergo
     - docker pull postgres
-    - docker run --name db -network ergo -e POSTGRES_USER=admin POSTGRES_PASSWORD=admin POSTGRES_DB=db_accounting -d postgres
+    - docker run --name db --network ergo -e POSTGRES_USER=admin POSTGRES_PASSWORD=admin POSTGRES_DB=db_accounting -d postgres
     - docker ps
     - docker images
     - docker logs db
