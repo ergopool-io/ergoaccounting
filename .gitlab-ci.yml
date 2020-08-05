@@ -16,22 +16,13 @@ before_script:
   - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
 stages:
-  - build
   - test
-
-build:
-  stage: build
-  script:
-    - echo $CONTAINER_RELEASE_IMAGE
-    - echo $CONTAINER_TEST_IMAGE
-    - docker build --pull -t $CONTAINER_TEST_IMAGE .
-    - docker push $CONTAINER_TEST_IMAGE
 
 test:
   stage: test
   script:
     - docker network create --driver bridge ergo
-    - docker pull postgres
+    - docker pull postgres:10.11
     - echo "POSTGRES_DB=db_accounting\nPOSTGRES_USER=admin\nPOSTGRES_PASSWORD=admin\nPG_ROOT_PASSWORD=admin" >> pg-env.list
     - docker run --name db --network="ergo" --hostname="postgres" --env-file=pg-env.list -d postgres
     - docker ps
