@@ -3,6 +3,8 @@ services:
   - name: docker:19.03.12-dind
     entrypoint: ["env", "-u", "DOCKER_HOST"]
     command: ["dockerd-entrypoint.sh"]
+  - name: postgres:latest
+    alias: db
 
 variables:
     CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
