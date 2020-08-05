@@ -28,4 +28,4 @@ test:
     - docker images
     - docker logs db
     - docker pull $CONTAINER_TEST_IMAGE
-    - docker run -network ergo -d $CONTAINER_TEST_IMAGE ./script.sh
+    - docker run --network ergo -d $CONTAINER_TEST_IMAGE ./script.sh
