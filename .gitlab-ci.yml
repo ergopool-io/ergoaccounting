@@ -1,17 +1,13 @@
 image: docker:19.03.12
+
 services:
   - docker:19.03.12-dind
-  - postgres:latest
 variables:
     CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
-    POSTGRES_USER: admin
-    POSTGRES_PASSWORD: admin
-    POSTGRES_DB: db_accounting
-    PG_ROOT_PASSWORD: admin
 
 stages:
-  - build
+#  - build
   - test
 
 before_script:
@@ -27,6 +23,13 @@ build:
 
 test:
   stage: test
+  services:
+    - postgres:latest
+  variables:
+    POSTGRES_USER: admin
+    POSTGRES_PASSWORD: admin
+    POSTGRES_DB: db_accounting
+    PG_ROOT_PASSWORD: admin
   script:
     - docker pull $CONTAINER_TEST_IMAGE
     - docker run $CONTAINER_TEST_IMAGE ./script.sh
