@@ -1,5 +1,4 @@
 image: docker:19.03.12
-
 services:
   - docker:19.03.12-dind
 variables:
@@ -7,18 +6,19 @@ variables:
     CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
 
 stages:
+  - build
   - test
 
 before_script:
   - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
-#build:
-#  stage: build
-#  script:
-#    - echo $CONTAINER_RELEASE_IMAGE
-#    - echo $CONTAINER_TEST_IMAGE
-#    - docker build --pull -t $CONTAINER_TEST_IMAGE .
-#    - docker push $CONTAINER_TEST_IMAGE
+build:
+  stage: build
+  script:
+    - echo $CONTAINER_RELEASE_IMAGE
+    - echo $CONTAINER_TEST_IMAGE
+    - docker build --pull -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
 
 test:
   stage: test
