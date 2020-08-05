@@ -6,6 +6,7 @@ services:
   - name: postgres:latest
     alias: db
 
+
 variables:
     CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
@@ -15,7 +16,6 @@ variables:
     POSTGRES_USER: admin
     POSTGRES_PASSWORD: admin
     POSTGRES_DB: db_accounting
-    PG_ROOT_PASSWORD: admin
 
 stages:
   - test
@@ -26,7 +26,14 @@ before_script:
 
 test:
   stage: test
+  variables:
+    POSTGRES_USER: admin
+    POSTGRES_PASSWORD: admin
+    POSTGRES_DB: db_accounting
+    PG_ROOT_PASSWORD: admin
   script:
     - docker ps
+    - docker images
+    - docker logs db
     - docker pull $CONTAINER_TEST_IMAGE
     - docker run $CONTAINER_TEST_IMAGE ./script.sh
