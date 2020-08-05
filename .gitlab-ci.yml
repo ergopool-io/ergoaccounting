@@ -27,6 +27,6 @@ before_script:
 test:
   stage: test
   script:
-    - nslookup db
+    - docker ps
     - docker pull $CONTAINER_TEST_IMAGE
     - docker run $CONTAINER_TEST_IMAGE ./script.sh
