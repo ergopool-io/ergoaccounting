@@ -1,0 +1,5 @@
+POSTGRES_DB=neolyze
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=neolyzePostgrePass!!!
+PG_ROOT_PASSWORD=neolyzePostgrePass!!!
+POSTGRES_PORT=5432
