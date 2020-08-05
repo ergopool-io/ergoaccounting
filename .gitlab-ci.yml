@@ -3,8 +3,6 @@ services:
   - name: docker:19.03.12-dind
     entrypoint: ["env", "-u", "DOCKER_HOST"]
     command: ["dockerd-entrypoint.sh"]
-  - name: postgres:latest
-    alias: db
 
 
 variables:
@@ -31,6 +29,9 @@ test:
     POSTGRES_PASSWORD: admin
     POSTGRES_DB: db_accounting
     PG_ROOT_PASSWORD: admin
+  services:
+    - name: postgres:latest
+      alias: db
   script:
     - docker ps
     - docker images
