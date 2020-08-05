@@ -1,15 +1,14 @@
-image: "python:3.7"
-
-before_script:
-  - cp ErgoAccounting/production.py.sample ErgoAccounting/production.py
-  - apt-get update -qy
-  - apt-get install -y postgresql-11 postgresql-client-11 postgresql-contrib-11 sudo screen
-  - pip3 install -r requirements.txt
-
 stages:
   - test
-
+default:
+  image: docker:19.03.12
 test:
+  image: "python:3.7"
+  before_script:
+    - cp ErgoAccounting/production.py.sample ErgoAccounting/production.py
+    - apt-get update -qy
+    - apt-get install -y postgresql-11 postgresql-client-11 postgresql-contrib-11 sudo screen
+    - pip3 install -r requirements.txt
   stage: test
   script:
   - screen -dm sudo -u postgres /usr/lib/postgresql/11/bin/postgres -D /var/lib/postgresql/11/main -c config_file=/etc/postgresql/11/main/postgresql.conf
@@ -17,3 +16,5 @@ test:
   - sudo -u postgres psql -c "CREATE USER ergo WITH PASSWORD 'ergo' SUPERUSER;"
   - coverage run --omit="*/migrations/*","*/wsgi.py","*/urls.py","*/settings.py","*/production.py" --source=core,ErgoAccounting manage.py test -v 2
   - coverage report --fail-under=85
+
+
