@@ -28,4 +28,4 @@ test:
     - docker ps
     - docker images
     - docker pull $CONTAINER_TEST_IMAGE
-    - docker run --network ergo $CONTAINER_TEST_IMAGE ./script.sh
+    - docker run --network="ergo" $CONTAINER_TEST_IMAGE ./script.sh
