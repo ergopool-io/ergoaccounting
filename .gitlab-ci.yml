@@ -7,7 +7,6 @@ variables:
     CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
 
 stages:
-#  - build
   - test
 
 before_script:
