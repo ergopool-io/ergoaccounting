@@ -11,28 +11,21 @@ variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: ""
-    POSTGRES_USER: admin
-    POSTGRES_PASSWORD: admin
-    POSTGRES_DB: db_accounting
+
+before_script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
 stages:
   - test
 
 test:
   stage: test
-  variables:
-    POSTGRES_USER: admin
-    POSTGRES_PASSWORD: admin
-    POSTGRES_DB: db_accounting
-    PG_ROOT_PASSWORD: admin
-  services:
-    - name: postgres:latest
-      alias: db
-  before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
+    - docker network create ergo
+    - docker pull postgres
+    - docker run --name db -network ergo -e POSTGRES_USER=admin POSTGRES_PASSWORD=admin POSTGRES_DB=db_accounting -d postgres
     - docker ps
     - docker images
     - docker logs db
     - docker pull $CONTAINER_TEST_IMAGE
-    - docker run $CONTAINER_TEST_IMAGE ./script.sh
+    - docker run -network ergo -d $CONTAINER_TEST_IMAGE ./script.sh
