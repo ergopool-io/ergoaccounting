@@ -23,9 +23,14 @@ test:
   script:
     - docker network create ergo
     - docker pull postgres
-    - docker run --name db --network ergo -e POSTGRES_USER=admin POSTGRES_PASSWORD=admin POSTGRES_DB=db_accounting -d postgres
+    - cat << EOF > pg-env.list
+      POSTGRES_DB=db_accounting
+      POSTGRES_USER=admin
+      POSTGRES_PASSWORD=admin
+      PG_ROOT_PASSWORD=admin
+      EOF
+    - docker run --name db --network="ergo" --hostname="db" --env-file=pg-env.list -d postgres
     - docker ps
     - docker images
-    - docker logs db
     - docker pull $CONTAINER_TEST_IMAGE
     - docker run --network ergo -d $CONTAINER_TEST_IMAGE ./script.sh
