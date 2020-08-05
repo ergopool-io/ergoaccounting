@@ -14,7 +14,7 @@ DATABASES = {
         'NAME': 'db_accounting',
         'USER': 'admin',
         'PASSWORD': 'admin',
-        'HOST': 'postgres',  # same as the docker-compose service
+        'HOST': 'db',  # same as the docker-compose service
         'PORT': 5432,
     }
 }
