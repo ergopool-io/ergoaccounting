@@ -12,31 +12,29 @@ variables:
     DOCKER_HOST: tcp://docker:2376
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: ""
+    POSTGRES_USER: admin
+    POSTGRES_PASSWORD: admin
+    POSTGRES_DB: db_accounting
+    PG_ROOT_PASSWORD: admin
 
 stages:
+  - build
   - test
 
 before_script:
   - echo $DOCKER_HOST
   - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
-#build:
-#  stage: build
-#  script:
-#    - echo $CONTAINER_RELEASE_IMAGE
-#    - echo $CONTAINER_TEST_IMAGE
-#    - docker build --pull -t $CONTAINER_TEST_IMAGE .
-#    - docker push $CONTAINER_TEST_IMAGE
+build:
+  stage: build
+  script:
+    - echo $CONTAINER_RELEASE_IMAGE
+    - echo $CONTAINER_TEST_IMAGE
+    - docker build --pull -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
 
 test:
   stage: test
-  services:
-    - postgres:latest
-  variables:
-    POSTGRES_USER: admin
-    POSTGRES_PASSWORD: admin
-    POSTGRES_DB: db_accounting
-    PG_ROOT_PASSWORD: admin
   script:
     - docker pull $CONTAINER_TEST_IMAGE
     - docker run $CONTAINER_TEST_IMAGE ./script.sh
