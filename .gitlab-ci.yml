@@ -1,20 +1,34 @@
-stages:
-  - test
 default:
   image: docker:19.03.12
+  variables:
+    CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+
+stages:
+  - build
+  - test
+
+before_script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+build:
+  stage: build
+  script:
+    - echo $CONTAINER_RELEASE_IMAGE
+    - echo $CONTAINER_TEST_IMAGE
+    - docker build --pull -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
+
+services:
+  - postgres:latest
+variables:
+  POSTGRES_USER: ergo
+  POSTGRES_PASSWORD: ergo
+  POSTGRES_DB: ergo
+  PG_ROOT_PASSWORD: ergo
+
 test:
-  image: "python:3.7"
-  before_script:
-    - cp ErgoAccounting/production.py.sample ErgoAccounting/production.py
-    - apt-get update -qy
-    - apt-get install -y postgresql-11 postgresql-client-11 postgresql-contrib-11 sudo screen
-    - pip3 install -r requirements.txt
   stage: test
   script:
-  - screen -dm sudo -u postgres /usr/lib/postgresql/11/bin/postgres -D /var/lib/postgresql/11/main -c config_file=/etc/postgresql/11/main/postgresql.conf
-  - sleep 3
-  - sudo -u postgres psql -c "CREATE USER ergo WITH PASSWORD 'ergo' SUPERUSER;"
-  - coverage run --omit="*/migrations/*","*/wsgi.py","*/urls.py","*/settings.py","*/production.py" --source=core,ErgoAccounting manage.py test -v 2
-  - coverage report --fail-under=85
-
-
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker run $CONTAINER_TEST_IMAGE ./script.sh
