@@ -5,7 +5,7 @@ services:
 variables:
     CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:test
     CONTAINER_DEV_IMAGE: $CI_REGISTRY:dev
-    CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+    CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
     DOCKER_HOST: tcp://docker:2375
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: ""
@@ -16,6 +16,7 @@ before_script:
 stages:
   - build
   - test
+  - release_dev
   - release
 
 build:
@@ -34,13 +35,19 @@ test:
     - docker pull $CONTAINER_TEST_IMAGE
     - docker run --network="ergo" $CONTAINER_TEST_IMAGE ./script.sh
 
+release_dev:
+  stage: release_dev
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_DEV_IMAGE
+    - docker push $CONTAINER_DEV_IMAGE
+
 release:
   stage: release
   rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      variables:
-        CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:$CI_DEFAULT_BRANCH
+    - if: '$CI_COMMIT_TAG'
   script:
-    - docker pull $CONTAINER_TEST_IMAGE
-    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_RELEASE_IMAGE
+    - docker build --cache-from $CI_REGISTRY_IMAGE:dev -t $CONTAINER_RELEASE_IMAGE .
     - docker push $CONTAINER_RELEASE_IMAGE
