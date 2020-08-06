@@ -14,19 +14,18 @@ before_script:
   - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
 stages:
-#  - build
+  - build
   - test
+  - release
 
-#build:
-#  stage: build
-#  script:
-#    - docker build --pull -t $CONTAINER_TEST_IMAGE .
-#    - docker push $CONTAINER_TEST_IMAGE
+build:
+  stage: build
+  script:
+    - docker build --pull -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
 
 test:
   stage: test
-  rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
     - docker network create --driver bridge ergo
     - docker pull postgres
@@ -34,3 +33,14 @@ test:
     - sleep 4
     - docker pull $CONTAINER_TEST_IMAGE
     - docker run --network="ergo" $CONTAINER_TEST_IMAGE ./script.sh
+
+release:
+  stage: release
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      variables:
+        CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:$CI_DEFAULT_BRANCH
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_RELEASE_IMAGE
+    - docker push $CONTAINER_RELEASE_IMAGE
