@@ -16,10 +16,11 @@ stages:
   - release_dev
   - release
 
+before_script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
 build:
   stage: build
-  before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
     - docker build --pull -t $CONTAINER_TEST_IMAGE .
     - docker push $CONTAINER_TEST_IMAGE
