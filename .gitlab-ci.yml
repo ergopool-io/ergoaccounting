@@ -27,8 +27,6 @@ build:
 
 test:
   stage: test
-  rules:
-    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
   script:
     - docker network create --driver bridge ergo
     - docker pull postgres
