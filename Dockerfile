@@ -14,6 +14,7 @@ ADD ErgoAccounting/ /var/www/src/ErgoAccounting/
 COPY manage.py /var/www/src/
 COPY config/uwsgi.ini /var/www/
 COPY config/production.py /var/www/src/ErgoAccounting/
+COPY script.sh /var/www/src/script.sh
 
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
