@@ -593,6 +593,19 @@ def periodic_calculate_hash_rate():
     logger.info('done calculating hash rate of pool and network.')
 
 
+@app.task
+def periodic_check_shares():
+    logger.info('running periodic check shares')
+    time_period = timezone.now() - timedelta(seconds=settings.PERIOD_CHECK_SHARES)
+    number_invalid_shares = Share.objects.filter(status__in=["invalid", "repetitious"], created_at__gte=time_period).count()
+    if number_invalid_shares >= settings.THRESHOLD_INVALID_SHARES:
+        logger.critical(
+            'it seems that there is a problem for shares, number of invalid shares in PERIOD_CHECK_SHARES is {}'.format(
+                number_invalid_shares
+            ))
+    logger.info('done periodic check shares')
+
+
 @app.task(bind=True, max_retries=settings.NUMBER_OF_RETRIES_RUN_TASK)
 def send_support_email(self, subject, message):
     num_tried = 0
