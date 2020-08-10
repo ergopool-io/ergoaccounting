@@ -3765,6 +3765,7 @@ class PaymentViewTestCase(TestCase):
         for b in Balance.objects.filter(status='mature'):
             expected.append({
                 'miner_id': b.miner.id,
+                'miner_pk': b.miner.public_key,
                 'balance': b.balance,
                 'actual_payment': b.balance,
                 'min_height': b.min_height,
