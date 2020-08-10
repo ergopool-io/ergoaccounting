@@ -132,6 +132,11 @@ app.conf.beat_schedule = {
         'schedule': parse_cron_tab(os.environ.get('PERIODIC_CALCULATE_HASH_RATE'), 300),
         'args': ()
     },
+    'periodic_check_shares': {
+        'task': 'core.tasks.periodic_check_shares',
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_CHECK_SHARES'), 25 * 60),
+        'args': ()
+    },
 }
 
 # aggregate parameters, please set with a confidence threshold
@@ -161,7 +166,10 @@ PERIOD_ACTIVE_MINERS_COUNT = 3600
 TOTAL_PERIOD_COUNT_SHARE = 24 * 60 * 60
 # limit of getting block for calculate hash_rate periodic_task
 LIMIT_NUMBER_BLOCK = 50
-
+# Period check invalid shares, 30 minute (second)
+PERIOD_CHECK_SHARES = 30 * 60
+# The threshold for send invalid shares notice to admin
+THRESHOLD_INVALID_SHARES = 8
 
 RECAPTCHA_SECRET = ""
 RECAPTCHA_SITE_KEY = ""
