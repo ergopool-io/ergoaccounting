@@ -1018,11 +1018,11 @@ class PaymentViewSet(viewsets.ViewSet):
         for b in balances:
             res.append({
                 'miner_id': b.miner.id,
+                'miner_pk': b.miner.public_key,
                 'balance': -b.balance,
                 'actual_payment': b.actual_payment,
                 'min_height': b.min_height,
                 'max_height': b.max_height
-
             })
         return JsonResponse(res, safe=False)
 
