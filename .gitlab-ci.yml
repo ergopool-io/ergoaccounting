@@ -1,19 +1,53 @@
-image: "python:3.7"
+image: docker:19.03.12
+services:
+  - name: docker:19.03.12-dind
 
-before_script:
-  - cp ErgoAccounting/production.py.sample ErgoAccounting/production.py
-  - apt-get update -qy
-  - apt-get install -y postgresql-11 postgresql-client-11 postgresql-contrib-11 sudo screen
-  - pip3 install -r requirements.txt
+variables:
+    CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:test
+    CONTAINER_DEV_IMAGE: $CI_REGISTRY_IMAGE:dev
+    CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
 
 stages:
+  - build
   - test
+  - release_dev
+  - release
+
+before_script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+build:
+  stage: build
+  script:
+    - docker build --pull -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
 
 test:
   stage: test
   script:
-  - screen -dm sudo -u postgres /usr/lib/postgresql/11/bin/postgres -D /var/lib/postgresql/11/main -c config_file=/etc/postgresql/11/main/postgresql.conf
-  - sleep 3
-  - sudo -u postgres psql -c "CREATE USER ergo WITH PASSWORD 'ergo' SUPERUSER;"
-  - coverage run --omit="*/migrations/*","*/wsgi.py","*/urls.py","*/settings.py","*/production.py" --source=core,ErgoAccounting manage.py test -v 2
-  - coverage report --fail-under=85
+    - docker network create --driver bridge ergo
+    - docker pull postgres
+    - docker run --name db -e POSTGRES_DB=db_accounting -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e PG_ROOT_PASSWORD=admin --network="ergo" --hostname="db" -d postgres
+    - sleep 4
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker run --network="ergo" $CONTAINER_TEST_IMAGE ./script.sh
+
+release_dev:
+  stage: release_dev
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_DEV_IMAGE
+    - docker push $CONTAINER_DEV_IMAGE
+
+release:
+  stage: release
+  rules:
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - docker build --cache-from $CI_REGISTRY_IMAGE:dev -t $CONTAINER_RELEASE_IMAGE .
+    - docker push $CONTAINER_RELEASE_IMAGE
