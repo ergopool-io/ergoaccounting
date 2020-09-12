@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import requests
 from datetime import datetime, timedelta
 from hashlib import blake2b
 from pathlib import Path
@@ -178,6 +179,56 @@ def periodic_withdrawal(just_return=False):
     if just_return:
         return objects
     Balance.objects.bulk_create(objects)
+
+
+@app.task
+def periodic_check_pool_nodes():
+    """
+    A task for check status of main and backup ErgoNode.
+    :return:
+    """
+    logger.info('running periodic check pool nodes.')
+
+    def get_height_node(backup=False):
+        type_node = "backup node" if backup else "node"
+        # getting current height
+        res = node_request('info', node_backup=backup)
+        if res['status'] != 'success':
+            if res['status'] == 'failed':
+                getattr(logger, "debug" if backup else "critical")('don\'t set {} address!'.format(type_node))
+            else:
+                logger.critical('can not get info from backup node!')
+        else:
+            return res['response']['fullHeight']
+
+    response = {}
+    try:
+        url = urljoin(settings.ERGO_EXPLORER_ADDRESS, 'blocks')
+        # Send request to Ergo_explorer for get blocks
+        response = requests.get(url, {"limit": 1})
+        response = response.json()
+        logger.debug("Get response {} from url {}".format(url, response))
+        base_height = response['items'][0]['height']
+    except requests.exceptions.RequestException as e:
+        logger.critical("Can not resolve response from explorer")
+        logger.critical(e)
+        return
+    except:
+        logger.critical("Response of explorer is invalid {}:".format(response))
+        return
+
+    backup_node = True if settings.NODE_ADDRESS_BACKUP else False
+    height_base_node = int(get_height_node())
+    if not -settings.THRESHOLD_CHECK_HEIGHT < (base_height - height_base_node) < settings.THRESHOLD_CHECK_HEIGHT:
+        logger.critical("Base node isn't sync")
+
+    if backup_node:
+        height_backup_node = int(get_height_node(True))
+        if not -settings.THRESHOLD_CHECK_HEIGHT < (base_height - height_backup_node) < settings.THRESHOLD_CHECK_HEIGHT:
+            logger.critical("Backup node isn't sync")
+
+    logger.info('done periodic check pool nodes')
+    return
 
 
 @app.task

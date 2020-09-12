@@ -32,6 +32,7 @@ DEFAULT_PAGINATION_SIZE = 50
 
 # Address Node (ex: "http://127.0.0.1:9053/")
 NODE_ADDRESS = "Address Node"
+NODE_ADDRESS_BACKUP = "Address Node"
 
 # Secret Key of Node(apiKey) (ex: "623f4e8e440007f45020afabbf56d8ba43144778757ea88497c794ad529a0433")
 API_KEY = "Secret Key of Node"
@@ -137,6 +138,11 @@ app.conf.beat_schedule = {
         'schedule': parse_cron_tab(os.environ.get('PERIODIC_CHECK_SHARES'), 25 * 60),
         'args': ()
     },
+    'periodic_check_pool_nodes': {
+        'task': 'core.tasks.periodic_check_pool_nodes',
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_CHECK_POOL_NODES'), 25 * 60),
+        'args': ()
+    },
 }
 
 # aggregate parameters, please set with a confidence threshold
@@ -239,3 +245,7 @@ RECEIVERS_EMAIL_ADDRESS = ['support@ergopool.io',]
 NUMBER_OF_RETRIES_RUN_TASK = 100
 # number that define it as an exponential value that gets increased by each retry
 NUMBER_START_EXPONENTIAL_RETRIES = 900
+
+# number of block that a node can falling behind the last block
+# (Note: for example if set 3, will be checked between -3 to 3)
+THRESHOLD_CHECK_HEIGHT = 3
