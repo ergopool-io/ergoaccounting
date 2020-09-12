@@ -33,6 +33,7 @@ DEFAULT_PAGINATION_SIZE = 50
 
 # Address Node (ex: "http://127.0.0.1:9053/")
 NODE_ADDRESS = "http://%s:%s/" % (os.environ.get("NODE_HOST"), os.environ.get("NODE_PORT", "9052"))
+NODE_ADDRESS_BACKUP = "http://%s:%s/" % (os.environ.get("NODE_HOST_BACKUP"), os.environ.get("NODE_PORT_BACKUP")) if os.environ.get("NODE_HOST_BACKUP") else ""
 
 # Secret Key of Node(apiKey) (ex: "623f4e8e440007f45020afabbf56d8ba43144778757ea88497c794ad529a0433")
 API_KEY = os.environ.get("SECRET")
@@ -137,6 +138,11 @@ app.conf.beat_schedule = {
     'periodic_check_shares': {
         'task': 'core.tasks.periodic_check_shares',
         'schedule': parse_cron_tab(os.environ.get('PERIODIC_CHECK_SHARES'), 25 * 60),
+        'args': ()
+    },
+    'periodic_check_pool_nodes': {
+        'task': 'core.tasks.periodic_check_pool_nodes',
+        'schedule': parse_cron_tab(os.environ.get('PERIODIC_CHECK_POOL_NODES'), 25 * 60),
         'args': ()
     },
 }
@@ -244,3 +250,7 @@ RECEIVERS_EMAIL_ADDRESS = os.environ.get('RECEIVERS_EMAIL_ADDRESS', ['support@er
 NUMBER_OF_RETRIES_RUN_TASK = os.environ.get("NUMBER_OF_RETRIES_RUN_TASK")
 # number that define it as an exponential value that gets increased by each retry
 NUMBER_START_EXPONENTIAL_RETRIES = os.environ.get("NUMBER_START_EXPONENTIAL_RETRIES")
+
+# number of block that a node can falling behind the last block
+# (Note: for example if set 3, will be checked between -3 to 3)
+THRESHOLD_CHECK_HEIGHT = 3

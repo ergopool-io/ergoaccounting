@@ -17,6 +17,7 @@ MAX_PAGINATION_SIZE = getattr(settings, "MAX_PAGINATION_SIZE")
 DEFAULT_PAGINATION_SIZE = getattr(settings, "DEFAULT_PAGINATION_SIZE")
 API_KEY = getattr(settings, "API_KEY")
 NODE_ADDRESS = getattr(settings, "NODE_ADDRESS")
+NODE_ADDRESS_BACKUP = getattr(settings, "NODE_ADDRESS_BACKUP")
 
 
 class RewardAlgorithm(metaclass=abc.ABCMeta):
@@ -247,7 +248,7 @@ class PPLNS(RewardAlgorithm):
         return prev_shares[prev_shares.count() - 1]
 
 
-def node_request(api, header=None, data=None, params=None, request_type="get"):
+def node_request(api, header=None, data=None, params=None, request_type="get", node_backup=False):
     """
     Function for request to node
     :param api: string
@@ -255,6 +256,7 @@ def node_request(api, header=None, data=None, params=None, request_type="get"):
     :param data: For request post use this
     :param request_type: For select ypt of request get or post
     :param params: query string
+    :param node_backup: Boolean to select the node for the request
     :return: response of request
     """
     if header is None:
@@ -275,8 +277,16 @@ def node_request(api, header=None, data=None, params=None, request_type="get"):
             kwargs["data"] = json.dumps(data)
         if params:
             kwargs["params"] = params
+        node = NODE_ADDRESS
+        if node_backup:
+            if not NODE_ADDRESS_BACKUP:
+                return {
+                    "status": "failed"
+                }
+            else:
+                node = NODE_ADDRESS_BACKUP
         # call requests method according to request_type
-        response = getattr(requests, request_type)(urljoin(NODE_ADDRESS, api), **kwargs)
+        response = getattr(requests, request_type)(urljoin(node, api), **kwargs)
         response_json = response.json()
         # check status code 2XX range is success
         return {
