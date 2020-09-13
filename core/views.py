@@ -1010,6 +1010,8 @@ class PaymentViewSet(viewsets.ViewSet):
     returns list of miner: balance pairs with GET
     creates pending_withdrawal balances with post
     """
+    authentication_classes = [SessionAuthentication, ExpireTokenAuthentication]
+    permission_classes = [CustomPermission]
 
     def list(self, request):
         balances = periodic_withdrawal(just_return=True)
