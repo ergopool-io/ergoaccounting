@@ -107,15 +107,8 @@ class Miner(models.Model):
 
 
 class Address(models.Model):
-    STATUS_CHOICE = (
-        ("miner", "miner address"),
-        ("lock", "lock address"),
-        ("withdraw", "withdraw address")
-    )
-
     address = models.CharField(max_length=255, blank=False, null=False, unique=True)
-    category = models.CharField(blank=False, choices=STATUS_CHOICE, max_length=100)
-    address_miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
+    miner = models.ForeignKey(Miner, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     last_used = models.DateTimeField(auto_now=True)
 
@@ -144,8 +137,6 @@ class Share(models.Model):
     pow_identity = models.CharField(max_length=200, blank=True, null=True)
     is_aggregated = models.BooleanField(default=False)
     miner_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='miner_addresses')
-    lock_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='lock_addresses')
-    withdraw_address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, related_name='withdraw_addresses')
     is_orphaned = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

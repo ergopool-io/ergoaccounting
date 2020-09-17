@@ -19,8 +19,6 @@ class AggregateShareSerializer(serializers.ModelSerializer):
 class ShareSerializer(serializers.ModelSerializer):
     miner = serializers.CharField()
     miner_address = serializers.CharField(allow_null=True)
-    lock_address = serializers.CharField(allow_null=True)
-    withdraw_address = serializers.CharField(allow_null=True)
     parent_id = serializers.CharField(allow_null=True)
     difficulty = serializers.IntegerField(allow_null=True)
     client_ip = serializers.IPAddressField(allow_blank=True, write_only=True)
@@ -71,12 +69,6 @@ class ShareSerializer(serializers.ModelSerializer):
             if not attrs.get("miner_address"):
                 logger.error('miner_address is not provided for solved or valid share.')
                 raise serializers.ValidationError("miner_address is required when solved or valid solution received")
-            if not attrs.get("lock_address"):
-                logger.error('lock_address is not provided for solved or valid share.')
-                raise serializers.ValidationError("lock_address is required when solved or valid solution received")
-            if not attrs.get("withdraw_address"):
-                logger.error('withdraw_address is not provided for solved or valid share.')
-                raise serializers.ValidationError("withdraw_address is required when solved or valid solution received")
         else:
             if 'parent_id' in attrs:
                 del attrs['parent_id']
@@ -86,10 +78,6 @@ class ShareSerializer(serializers.ModelSerializer):
                 del attrs['block_height']
             if 'difficulty' in attrs:
                 del attrs['difficulty']
-            if 'lock_address' in attrs:
-                del attrs['lock_address']
-            if 'withdraw_address' in attrs:
-                del attrs['withdraw_address']
             if 'miner_address' in attrs:
                 del attrs['miner_address']
             if 'pow_identity' in attrs:
@@ -100,7 +88,7 @@ class ShareSerializer(serializers.ModelSerializer):
     class Meta:
         model = Share
         fields = ['share', 'miner', 'status', 'transaction_id', 'block_height', 'difficulty',
-                  'created_at', 'miner_address', 'lock_address', 'withdraw_address', 'parent_id',
+                  'created_at', 'miner_address', 'parent_id',
                   'next_ids', 'path', 'client_ip', 'pow_identity']
         write_only_fields = ['transaction_id', 'block_height', 'parent_id', 'next_ids', 'path', 'client_ip', 'pow_identity']
 

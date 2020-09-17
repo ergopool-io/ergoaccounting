@@ -382,7 +382,7 @@ def get_miner_payment_address(miner):
     :param miner: a miner object
     :return: miner address associated with the given miner
     """
-    address = Address.objects.filter(address_miner=miner, category='miner').order_by('-last_used').first()
+    address = Address.objects.filter(miner=miner).order_by('-last_used').first()
     if address is not None:
         return address.address
 
