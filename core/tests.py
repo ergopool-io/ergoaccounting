@@ -38,10 +38,8 @@ class ShareTestCase(TestCase):
     def setUp(self):
         self.client = Client()
         Miner.objects.create(public_key="2", nick_name="Parsa")
-        self.addresses = {
+        self.address = {
             'miner_address': random_string(),
-            'lock_address': random_string(),
-            'withdraw_address': random_string()
         }
 
     @patch('core.utils.RewardAlgorithm.get_instance')
@@ -68,16 +66,10 @@ class ShareTestCase(TestCase):
                 'next_ids': [],
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(mocked_not_call_prop.called)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['miner_address'],
-                                                category='miner').count(), 0)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='1', address=self.addresses['lock_address'],
-                                                category='lock').count(), 0)
-        self.assertEqual(
-            Address.objects.filter(address_miner__public_key='1', address=self.addresses['withdraw_address'],
-                                   category='withdraw').count(), 0)
+        self.assertEqual(Address.objects.filter(miner__public_key='1', address=self.address['miner_address']).count(), 0)
 
     def test_solved_share_without_transaction_id(self):
         """
@@ -95,7 +87,7 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -116,7 +108,7 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -136,7 +128,7 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -156,7 +148,7 @@ class ShareTestCase(TestCase):
                 'next_ids': [],
                 'client_ip': '127.0.0.5',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -177,7 +169,7 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.1',
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -199,11 +191,8 @@ class ShareTestCase(TestCase):
                 "client_ip": "127.0.0.5",
                 "path": "-1",
                 "difficulty": 123456,
-                "withdraw_address": "test",
-                "miner_address": "test",
-                "lock_address": "test"
                 }
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
 
         data = {"share": share + 'bhkk',
@@ -218,7 +207,7 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.1',
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
 
         self.assertTrue(Share.objects.filter(share=share).exists())
@@ -240,7 +229,7 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.5',
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertFalse(Share.objects.filter(share=share).exists())
 
@@ -264,7 +253,7 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.1',
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         client_update = MinerIP.objects.filter(miner=miner)[0].updated_at
         self.assertGreater(client_update, client.updated_at)
@@ -289,22 +278,17 @@ class ShareTestCase(TestCase):
                 'client_ip': '127.0.0.2',
                 'path': '-1',
                 'difficulty': 123456}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertEqual(MinerIP.objects.filter(miner=miner).count(), 2)
 
     def test_validate_unsolved_share_update_last_used(self):
         """
         test if a non-solution submitted share must store with None in transaction_id
-        addresses are present, last_used field must be updated
+        address are present, last_used field must be updated
         """
-        miner_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
-                                                 address=self.addresses['miner_address'], category='miner').last_used
-        lock_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
-                                                address=self.addresses['lock_address'], category='lock').last_used
-        withdraw_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
-                                                    address=self.addresses['withdraw_address'],
-                                                    category='withdraw').last_used
+        miner_last_used = Address.objects.create(miner=Miner.objects.get(public_key='2'),
+                                                 address=self.address['miner_address']).last_used
         share = uuid.uuid4().hex
         data = {'share': share,
                 'miner': '2',
@@ -318,60 +302,44 @@ class ShareTestCase(TestCase):
                 'status': 'valid',
                 'difficulty': 123456,
                 "pow_identity": "test"}
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
         self.assertEqual(Share.objects.filter(share=share).count(), 1)
         transaction = Share.objects.filter(share=share).first()
         self.assertIsNone(transaction.transaction_id)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
-                                                category='miner').count(), 1)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
-                                                category='lock').count(), 1)
         self.assertEqual(
-            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
-                                   category='withdraw').count(), 1)
-        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
-                                               category='miner').first().last_used > miner_last_used)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
-                                                category='lock').first().last_used, lock_last_used)
-        self.assertEqual(
-            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
-                                   category='withdraw').first().last_used, withdraw_last_used)
+            Address.objects.filter(miner__public_key='2', address=self.address['miner_address']).count(), 1
+        )
+
+        self.assertTrue(
+            Address.objects.filter(
+                miner__public_key='2', address=self.address['miner_address']
+            ).first().last_used > miner_last_used
+        )
 
     def test_validate_invalid_share_do_not_update_last_used(self):
         """
         test if a non-solution submitted share must store with None in transaction_id and block_height
-        addresses are present, last_used field must be updated
+        address are present, last_used field must be updated
         """
-        miner_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
-                                                 address=self.addresses['miner_address'], category='miner').last_used
-        lock_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
-                                                address=self.addresses['lock_address'], category='lock').last_used
-        withdraw_last_used = Address.objects.create(address_miner=Miner.objects.get(public_key='2'),
-                                                    address=self.addresses['withdraw_address'],
-                                                    category='withdraw').last_used
+        miner_last_used = Address.objects.create(miner=Miner.objects.get(public_key='2'),
+                                                 address=self.address['miner_address']).last_used
         share = uuid.uuid4().hex
         data = {'share': share,
                 'miner': '2',
                 'client_ip': '127.0.0.1',
                 'status': 'invalid'
                 }
-        data.update(self.addresses)
+        data.update(self.address)
         self.client.post('/shares/', data, format='json')
-        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
-                                                category='miner').count(), 1)
-        self.assertEqual(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
-                                                category='lock').count(), 1)
         self.assertEqual(
-            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
-                                   category='withdraw').count(), 1)
-        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['miner_address'],
-                                               category='miner').first().last_used == miner_last_used)
-        self.assertTrue(Address.objects.filter(address_miner__public_key='2', address=self.addresses['lock_address'],
-                                               category='lock').first().last_used == lock_last_used)
+            Address.objects.filter(miner__public_key='2', address=self.address['miner_address']).count(), 1
+        )
         self.assertTrue(
-            Address.objects.filter(address_miner__public_key='2', address=self.addresses['withdraw_address'],
-                                   category='withdraw').first().last_used == withdraw_last_used)
+            Address.objects.filter(
+                miner__public_key='2', address=self.address['miner_address']
+            ).first().last_used == miner_last_used
+        )
 
     def tearDown(self):
         Address.objects.all().delete()
@@ -1644,7 +1612,7 @@ class TransactionGenerateTestCase(TestCase):
                     min_height=1, max_height=100) for x in
             self.outputs]
         for pk, _ in self.outputs:
-            Address.objects.create(address_miner=Miner.objects.get(public_key=pk), category='miner', address=pk)
+            Address.objects.create(miner=Miner.objects.get(public_key=pk), address=pk)
 
     def test_generate_three_transactions_max_num_output_4(self, mocked_request):
         """
@@ -2963,49 +2931,6 @@ class GetMinerAddressTestCase(TestCase):
         address = get_miner_payment_address(self.miner)
         self.assertEqual(address, None)
 
-    def test_miner_has_several_withdraw_address_non_set(self):
-        """
-        several withdraw address, return the latest used one
-        """
-        selected = None
-        for _ in range(5):
-            selected = Address.objects.create(address_miner=self.miner, address=random_string(), category='withdraw')
-
-        address = get_miner_payment_address(self.miner)
-        self.assertEqual(address, selected.address)
-
-    def test_miner_has_several_address_non_set(self):
-        """
-        several withdraw address, return the latest used one
-        do not return addresses other than withdraw
-        """
-        selected = None
-        for _ in range(5):
-            selected = Address.objects.create(address_miner=self.miner, address=random_string(), category='withdraw')
-
-        Address.objects.create(address_miner=self.miner, address=random_string(), category='lock')
-
-        address = get_miner_payment_address(self.miner)
-        self.assertEqual(address, selected.address)
-
-    def test_miner_has_several_address_set_one(self):
-        """
-        several withdraw address
-        do not return addresses other than withdraw
-        miner has already selected one as payment address
-        """
-        for _ in range(5):
-            Address.objects.create(address_miner=self.miner, address=random_string(), category='withdraw')
-
-        Address.objects.create(address_miner=self.miner, address=random_string(), category='lock')
-
-        self.miner.selected_address = Address.objects.filter(category='withdraw').order_by('last_used').first()
-        self.miner.save()
-        selected = self.miner.selected_address
-
-        address = get_miner_payment_address(self.miner)
-        self.assertEqual(address, selected.address)
-
     def tearDown(self):
         Configuration.objects.all().delete()
         Miner.objects.all().delete()
@@ -3015,7 +2940,7 @@ class GetMinerAddressTestCase(TestCase):
         Balance.objects.all().delete()
 
 
-class GetMinerAddressTestCase(TestCase):
+class ErgoPriceTestCase(TestCase):
     """
     Test class for ergo price creation and get
     """
