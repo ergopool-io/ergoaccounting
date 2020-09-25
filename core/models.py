@@ -53,6 +53,8 @@ CONFIGURATION_KEY_CHOICE = (
     ("THRESHOLD_HEIGHT", "latest allowed height for mining"),
     # timestamp diff allowed to miner
     ("THRESHOLD_TIMESTAMP", "timestamp diff allowed to miner"),
+    # version of algorithm mining
+    ("VERSION_ALGO_MINING", "VERSION_ALGO_MINING")
 )
 
 CONFIGURATION_KEY_TO_TYPE = frozendict({
@@ -72,6 +74,7 @@ CONFIGURATION_KEY_TO_TYPE = frozendict({
     "CONFIRMATION_LENGTH": 'int',
     "THRESHOLD_HEIGHT": 'int',
     "THRESHOLD_TIMESTAMP": 'int',
+    "VERSION_ALGO_MINING": 'int'
 })
 
 CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
@@ -91,6 +94,7 @@ CONFIGURATION_DEFAULT_KEY_VALUE = frozendict({
     "CONFIRMATION_LENGTH": 720,
     "THRESHOLD_HEIGHT": 10,
     "THRESHOLD_TIMESTAMP": 120,
+    "VERSION_ALGO_MINING": 1
 })
 
 
